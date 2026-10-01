@@ -48,10 +48,8 @@ This is useful to state energy and policy analysts, researchers, and anyone aski
 ### Planned dashboard views
 
 - **Decoupling map:** states colored by % change in carbon intensity between two selectable years (multi-year averages to smooth noise).
-- **Decoupling scatter:** x = % change in real GDP, y = % change in CO2, one dot per state, with a y = x reference line. Points below the line grew cleaner.
 - **State profile:** pick a state and year to see the economy's makeup next to emissions by sector.
 - **What fuels changed?** Change in emissions by fuel type (coal, natural gas, petroleum).
-- **Energy prices vs. decoupling:** % change in energy prices against improvement in carbon intensity, with prices inflation-adjusted.
 
 ---
 
@@ -59,22 +57,73 @@ This is useful to state energy and policy analysts, researchers, and anyone aski
 
 | # | Source & Link | Method | What it contains | Update frequency | Access requirements | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | [EIA State Energy Data System (SEDS) CO2 emissions tables](https://www.eia.gov/environment/emissions/state/) | File (.xlsx downloaded from URL) | Energy-related CO2 by state, 1960–2024, in three workbooks (details below) | Annual (current release June 26, 2026; next June 25, 2027) | None. Public, no key | ✅ Implemented (`POST /ingest/eia`) |
-| 2 | [BEA Regional API](https://apps.bea.gov/api/data), table `SAGDP9`, `LineCode=1` | API | Real GDP by state and year, 1997–2024, in millions of chained 2017 dollars | Annual, revised yearly (quarterly state GDP also available as `SQGDP`) | Free key (`BEA_API_KEY`), [signup](https://apps.bea.gov/API/signup/). Limits: 100 requests/min, 100 MB/min, 30 errors/min | ✅ Access tested, collector in progress |
-| 3 | [EIA API v2, `electricity/electric-power-operational-data`](https://api.eia.gov/v2/electricity/electric-power-operational-data/data/) | API | Net electricity generation by state, fuel type, and sector (thousand MWh) | **Monthly** (posted about 2 months after the fact) | Free key (`EIA_API_KEY`), [signup](https://www.eia.gov/opendata/register.php). Max 5,000 rows per request | 🔜 Planned (recurring source) |
-| 4 | [EIA API v2, SEDS price series](https://www.eia.gov/opendata/) | API | Energy prices by state, 1997–2024: `CLEID` (coal price, electric power sector), `ESRCD` (residential electricity price), `ESTCD` (all-sector electricity price) | Annual | Same `EIA_API_KEY` | 🔜 Planned |
+| 1 | [EIA State Energy Data System (SEDS) CO2 emissions tables](https://www.eia.gov/environment/emissions/state/) | File (.xlsx downloaded from URL) | Energy-related CO2 by state, 1960–2024, in three workbooks (details below) | Annual (current release June 26, 2026; next June 25, 2027) | None. Public, no key | Implemented (`POST /ingest/eia`) |
+| 2 | [BEA Regional API](https://apps.bea.gov/api/data), table `SAGDP9`, `LineCode=1` | API | Real GDP by state and year, 1997–2024, in millions of chained 2017 dollars | Annual, revised yearly (quarterly state GDP also available as `SQGDP`) | Free key (`BEA_API_KEY`), [signup](https://apps.bea.gov/API/signup/). Limits: 100 requests/min, 100 MB/min, 30 errors/min | Access tested, collector in progress |
+| 3 | [EIA API v2, `electricity/electric-power-operational-data`](https://api.eia.gov/v2/electricity/electric-power-operational-data/data/) | API | Net electricity generation by state, fuel type, and sector (thousand MWh) | **Monthly** (posted about 2 months after the fact) | Free key (`EIA_API_KEY`), [signup](https://www.eia.gov/opendata/register.php). Max 5,000 rows per request | Planned (recurring source) |
+| 4 | [EIA API v2, SEDS price series](https://www.eia.gov/opendata/) | API | Energy prices by state, 1997–2024: `CLEID` (coal price, electric power sector), `ESRCD` (residential electricity price), `ESTCD` (all-sector electricity price) | Annual | Same `EIA_API_KEY` | Planned |
 
 ### Source 1 detail: EIA SEDS CO2 workbooks
 
-The collector downloads three workbooks from EIA and stores them in the bucket unchanged. All emissions values are in **million metric tons of CO2**. The 2024 values are marked final (`2024F`).
+The collector downloads three workbooks from EIA and stores them in the bucket unchanged. All emissions values are in **million metric tons of CO2**.
 
-| Workbook (bucket name) | Worksheets | EIA series codes (MSN) |
+| Workbook (bucket name) | Worksheets
 | --- | --- | --- |
-| `CO2_total.xlsx` | Total CO2, Per capita, CO2 per billion Btu (intensity of energy supply), CO2 per million dollars (intensity of economy, i.e. CO2 ÷ real GDP) | `TETCE` (total) |
-| `CO2_source.xlsx` | Coal, Natural gas, Petroleum, Total | `CLTCE`, `NNTCE`, `PMTCE`, `TETCE` |
-| `CO2_sector.xlsx` | Residential, Commercial, Industrial, Transportation, Electric power, Total | `TERCE`, `TECCE`, `TEICE`, `TEACE`, `TEEIE`, `TETCE` |
+| `CO2_total.xlsx` | Total CO2, Per capita, CO2 per billion Btu (intensity of energy supply), CO2 per million dollars (intensity of economy, i.e. CO2 ÷ real GDP)
+| `CO2_source.xlsx` | Coal, Natural gas, Petroleum, Total
+| `CO2_sector.xlsx` | Residential, Commercial, Industrial, Transportation, Electric power, Total
 
-Each workbook opens with a `Contents` sheet (title, release dates, notes) that the parser must skip. EIA's "CO2 per million dollars" sheet uses state GDP that SEDS maintains from 1997 forward, so it covers 1997 onward and serves as an independent check on our own intensity calculation.
+### Source 2 detail: BEA real GDP by state
+
+The collector calls the BEA Regional dataset once per run with these parameters:
+
+| Parameter | Value | Meaning |
+| --- | --- | --- |
+| `method` | `GetData` | Data request (vs. metadata discovery) |
+| `datasetname` | `Regional` | The only BEA dataset with state-level GDP |
+| `TableName` | `SAGDP9` | Real GDP by state, chained dollars, by industry |
+| `LineCode` | `1` | All-industry total |
+| `GeoFips` | `STATE` | Every state |
+| `Year` | `ALL` | Full available history |
+
+Each row returned is one state-year:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `GeoFips` | string | State FIPS code (e.g. `56000` for Wyoming) |
+| `GeoName` | string | State name |
+| `TimePeriod` | string → int | Year |
+| `DataValue` | string → float | Real GDP. Arrives as text with thousands separators, so it's converted to a number |
+| `CL_UNIT`, `UNIT_MULT` | string | Unit: millions of chained 2017 dollars |
+| `NoteRef` | string | Footnote reference |
+
+Processing notes:
+
+- Real GDP on the current industry classification starts in **1997**. Earlier state GDP isn't comparable, which is why the emissions-GDP window starts in 1997.
+- BEA sometimes reports errors inside a JSON body with HTTP status 200, so the collector checks the response for an error message instead of trusting the status code alone.
+- Suppressed or unavailable values (e.g. `(NA)`, `(D)`) become missing values.
+- `GeoFips=STATE` may also return a U.S. total or regional rows. These are filtered out before joining so only the 50 states plus DC remain.
+- BEA revises past years with each annual release, so every run re-pulls the full series instead of appending new years.
+- Chained-dollar values aren't additive, so state values are never summed to make a national total.
+
+### Source 3 detail: EIA monthly electricity generation
+
+Pulled from EIA API v2 route `electricity/electric-power-operational-data`, which EIA describes as monthly and annual electric power operations by state, sector, and energy source.
+
+| Facet / column | Description |
+| --- | --- |
+| `location` | State |
+| `fueltypeid` | Energy source (coal, natural gas, nuclear, wind, solar, etc.) |
+| `sectorid` | Generating sector (electric utility, independent power producer, etc.) |
+| `period` | Month (`YYYY-MM`). Quarterly and annual frequencies are also available |
+| `generation` | Net generation, in thousand MWh |
+
+Processing notes:
+
+- This is the project's main **recurring** source. EIA posts new months about two months after the fact, so each scheduled run can find new rows.
+- Responses are capped at 5,000 rows per request, so the collector pages through results using `offset` and `length`.
+- For the state-year join, monthly values are summed to annual totals. Monthly detail stays available for a "what's changing now" view.
+- The key derived field is each state's **coal share of generation**, the clearest mechanism behind falling carbon intensity in many states.
+- It uses the same `EIA_API_KEY` and request pattern as Source 4.
 
 ### Source 4 coverage notes
 
@@ -115,14 +164,6 @@ Only the joined data can show carbon intensity (CO2 ÷ real GDP) for every state
 - **Common window:** analyses combining emissions and GDP use **1997–2024**, where both sources overlap.
 - **Units:** CO2 (million metric tons) ÷ real GDP (millions of chained 2017 dollars) gives metric tons of CO2 per dollar of real GDP. Because that number is very small, we report **metric tons per million dollars** (the same scale as EIA's published sheet) or kilograms per dollar.
 
-| Derived field | Formula |
-| --- | --- |
-| `carbon_intensity` | CO2 ÷ real GDP |
-| `pct_change_gdp`, `pct_change_co2` | change between a start and end year |
-| `decoupling_category` | rule from the table under the Problem Statement |
-| `coal_share_generation` | coal generation ÷ total generation |
-
----
 
 ## Setup Instructions (Locally)
 
@@ -281,9 +322,3 @@ emission-impossible/
 
 ---
 
-## Roadmap
-
-| Phase | Due | Scope | Status |
-| --- | --- | --- | --- |
-| 2: Data collection and automation | Oct 2 | Collectors for each source, error handling and logging, raw + processed storage in GCS, Docker, scheduled collection | EIA CO2 ingestion working; other collectors in progress |
-| 3: API, web app, and cloud deployment | Oct 13 | REST endpoints for raw and processed data, Streamlit dashboard with filters, separate containers on Cloud Run, Cloud Scheduler | Not started |
