@@ -1,4 +1,4 @@
 .env
-*-key.json
+*.json
 .venv/
 __pycache__/
