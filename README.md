@@ -12,13 +12,21 @@ Which U.S. states have grown their economies while cutting carbon emissions? Thi
 
 | Name | GitHub ID | Role / Focus |
 | --- | --- | --- |
-| Liam Abrams | [liamtabrams](https://github.com/liamtabrams) | **TODO** (e.g. BEA real GDP collector) |
-| Nadeem Ahmedi | [nahmedi286179](https://github.com/nahmedi286179) | **TODO** (e.g. dashboard design, EIA energy-price data) |
-| Darshini Mysore Harishwara | [DarshiniMH](https://github.com/DarshiniMH) | **TODO** (e.g. EIA CO2 file ingestion → GCS) |
-| Rini Khaneja | [rinikhaneja](https://github.com/rinikhaneja) | **TODO** |
-| Jung Hoon (John) An | [junghoona](https://github.com/junghoona) | **TODO** (e.g. GCP project setup, code review) |
+| Liam Abrams | [liamtabrams](https://github.com/liamtabrams) | Transform and join; Dashboard |
+| Nadeem Ahmedi | [nahmedi286179](https://github.com/nahmedi286179) | Transform and join; Analysis and final report |
+| Darshini Mysore Harishwara | [DarshiniMH](https://github.com/DarshiniMH) | Data source extraction; Dashboard |
+| Rini Khaneja | [rinikhaneja](https://github.com/rinikhaneja) | Data source extraction; Transform and join |
+| Jung Hoon (John) An | [junghoona](https://github.com/junghoona) | Docker and GCP deployment |
 
-> Fill in roles to match the feature and branch each person signed up for in the team contract.
+### Division of work
+
+| Stage | Members | Feature | Git branch |
+| --- | --- | --- | --- |
+| 1. Data source extraction (EIA + BEA), adding more sources if needed | Darshini, Rini | Collectors that save raw files to GCS: EIA CO2 files (done), plus data from the EIA API endpoints | `feature/{api_name}` |
+| 2. Transform and join | Rini, Nadeem, Liam | One state-by-year table joining EIA CO2 with BEA GDP, with carbon intensity, saved to `processed/` | `feature/transform-join` |
+| 3. Analysis | Nadeem | Final project report: note findings, analyze trends, and try to answer the original project question | N/A (final report) |
+| 4. Dashboard, adding features if needed | Darshini, Liam | Streamlit map of carbon intensity by state, with a year slider | `feature/dashboard-map` |
+| 5. Docker and GCP | John | API and dashboard containers on Cloud Run, with scheduled data collection | `feature/docker-gcp-deploy` |
 
 ---
 
@@ -66,11 +74,11 @@ This is useful to state energy and policy analysts, researchers, and anyone aski
 
 The collector downloads three workbooks from EIA and stores them in the bucket unchanged. All emissions values are in **million metric tons of CO2**.
 
-| Workbook (bucket name) | Worksheets
-| --- | --- | --- |
-| `CO2_total.xlsx` | Total CO2, Per capita, CO2 per billion Btu (intensity of energy supply), CO2 per million dollars (intensity of economy, i.e. CO2 ÷ real GDP)
-| `CO2_source.xlsx` | Coal, Natural gas, Petroleum, Total
-| `CO2_sector.xlsx` | Residential, Commercial, Industrial, Transportation, Electric power, Total
+| Workbook (bucket name) | Worksheets |
+| --- | --- |
+| `CO2_total.xlsx` | Total CO2, Per capita, CO2 per billion Btu (intensity of energy supply), CO2 per million dollars (intensity of economy, i.e. CO2 ÷ real GDP) |
+| `CO2_source.xlsx` | Coal, Natural gas, Petroleum, Total |
+| `CO2_sector.xlsx` | Residential, Commercial, Industrial, Transportation, Electric power, Total |
 
 ### Source 2 detail: BEA real GDP by state
 
@@ -96,15 +104,6 @@ Each row returned is one state-year:
 | `CL_UNIT`, `UNIT_MULT` | string | Unit: millions of chained 2017 dollars |
 | `NoteRef` | string | Footnote reference |
 
-Processing notes:
-
-- Real GDP on the current industry classification starts in **1997**. Earlier state GDP isn't comparable, which is why the emissions-GDP window starts in 1997.
-- BEA sometimes reports errors inside a JSON body with HTTP status 200, so the collector checks the response for an error message instead of trusting the status code alone.
-- Suppressed or unavailable values (e.g. `(NA)`, `(D)`) become missing values.
-- `GeoFips=STATE` may also return a U.S. total or regional rows. These are filtered out before joining so only the 50 states plus DC remain.
-- BEA revises past years with each annual release, so every run re-pulls the full series instead of appending new years.
-- Chained-dollar values aren't additive, so state values are never summed to make a national total.
-
 ### Source 3 detail: EIA monthly electricity generation
 
 Pulled from EIA API v2 route `electricity/electric-power-operational-data`, which EIA describes as monthly and annual electric power operations by state, sector, and energy source.
@@ -116,14 +115,6 @@ Pulled from EIA API v2 route `electricity/electric-power-operational-data`, whic
 | `sectorid` | Generating sector (electric utility, independent power producer, etc.) |
 | `period` | Month (`YYYY-MM`). Quarterly and annual frequencies are also available |
 | `generation` | Net generation, in thousand MWh |
-
-Processing notes:
-
-- This is the project's main **recurring** source. EIA posts new months about two months after the fact, so each scheduled run can find new rows.
-- Responses are capped at 5,000 rows per request, so the collector pages through results using `offset` and `length`.
-- For the state-year join, monthly values are summed to annual totals. Monthly detail stays available for a "what's changing now" view.
-- The key derived field is each state's **coal share of generation**, the clearest mechanism behind falling carbon intensity in many states.
-- It uses the same `EIA_API_KEY` and request pattern as Source 4.
 
 ### Source 4 coverage notes
 
@@ -321,4 +312,3 @@ emission-impossible/
 ```
 
 ---
-
