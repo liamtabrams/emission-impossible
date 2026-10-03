@@ -18,16 +18,6 @@ Which U.S. states have grown their economies while cutting carbon emissions? Thi
 | Rini Khaneja | [rinikhaneja](https://github.com/rinikhaneja) | Data source extraction; Transform and join |
 | Jung Hoon (John) An | [junghoona](https://github.com/junghoona) | Docker and GCP deployment |
 
-### Division of work
-
-| Stage | Members | Feature | Git branch |
-| --- | --- | --- | --- |
-| 1. Data source extraction (EIA + BEA), adding more sources if needed | Darshini, Rini | Collectors that save raw files to GCS: EIA CO2 files (done), plus data from the EIA API endpoints | `feature/{api_name}` |
-| 2. Transform and join | Rini, Nadeem, Liam | One state-by-year table joining EIA CO2 with BEA GDP, with carbon intensity, saved to `processed/` | `feature/transform-join` |
-| 3. Analysis | Nadeem | Final project report: note findings, analyze trends, and try to answer the original project question | N/A (final report) |
-| 4. Dashboard, adding features if needed | Darshini, Liam | Streamlit map of carbon intensity by state, with a year slider | `feature/dashboard-map` |
-| 5. Docker and GCP | John | API and dashboard containers on Cloud Run, with scheduled data collection | `feature/docker-gcp-deploy` |
-
 ---
 
 ## Problem Statement
