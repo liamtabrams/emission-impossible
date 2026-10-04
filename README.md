@@ -250,14 +250,16 @@ gcloud storage ls gs://emission-impossible/raw/eia_co2/
 
 or open **Cloud Storage → Buckets → emission-impossible → raw → eia_co2** in the GCP console.
 
-### Optional: run the API in Docker
+### Running FastAPI in Docker
 
 ```bash
-docker build -t emission-impossible-api ./api
-docker run --env-file .env -p 8000:8000 emission-impossible-api
+cd api && docker build -t emission-impossible-api .
+cd .. && docker run -v absolute-path-to-GCP_service_account_key:/tmp/GCP_service_account_key.json --env-file .env -p 8000:8000 emission-impossible-api
 ```
 
-If you authenticate with a service account key, mount it into the container and set `GOOGLE_APPLICATION_CREDENTIALS` to the path inside the container.
+The server will run at `http://localhost:8000`. Interactive docs (Swagger UI) are at **http://localhost:8000/docs**.
+
+If you authenticate with a service account key, mount it into the container and set `GOOGLE_APPLICATION_CREDENTIALS` to the path inside the container `/tmp/`.
 
 ---
 
