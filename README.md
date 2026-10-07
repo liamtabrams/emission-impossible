@@ -56,7 +56,7 @@ This is useful to state energy and policy analysts, researchers, and anyone aski
 | # | Source & Link | Method | What it contains | Update frequency | Access requirements | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | [EIA State Energy Data System (SEDS) CO2 emissions tables](https://www.eia.gov/environment/emissions/state/) | File (.xlsx downloaded from URL) | Energy-related CO2 by state, 1960–2024, in three workbooks (details below) | Annual (current release June 26, 2026; next June 25, 2027) | None. Public, no key | Implemented (`POST /ingest/eia`) |
-| 2 | [BEA Regional API](https://apps.bea.gov/api/data), table `SAGDP9`, `LineCode=1` | API | Real GDP by state and year, 1997–2024, in millions of chained 2017 dollars | Annual, revised yearly (quarterly state GDP also available as `SQGDP`) | Free key (`BEA_API_KEY`), [signup](https://apps.bea.gov/API/signup/). Limits: 100 requests/min, 100 MB/min, 30 errors/min | Access tested, collector in progress |
+| 2 | [BEA Regional API](https://apps.bea.gov/api/data), table `SAGDP9`, `LineCode=1` | API | Real GDP by state and year, 1997–2025, in millions of chained 2017 dollars | Annual, revised yearly (quarterly state GDP also available as `SQGDP`) | Free key (`BEA_API_KEY`), [signup](https://apps.bea.gov/API/signup/). Limits: 100 requests/min, 100 MB/min, 30 errors/min | Implemented (`POST /ingest/bea`) |
 | 3 | [EIA API v2, `electricity/electric-power-operational-data`](https://api.eia.gov/v2/electricity/electric-power-operational-data/data/) | API | Net electricity generation by state, fuel type, and sector (thousand MWh) | **Monthly** (posted about 2 months after the fact) | Free key (`EIA_API_KEY`), [signup](https://www.eia.gov/opendata/register.php). Max 5,000 rows per request | Planned (recurring source) |
 | 4 | [EIA API v2, SEDS price series](https://www.eia.gov/opendata/) | API | Energy prices by state, 1997–2024: `CLEID` (coal price, electric power sector), `ESRCD` (residential electricity price), `ESTCD` (all-sector electricity price) | Annual | Same `EIA_API_KEY` | Planned |
 
@@ -212,7 +212,7 @@ The server runs at `http://localhost:8000`. Interactive docs (Swagger UI) are at
 
 ### 6. Call the ingestion endpoint
 
-**`POST /ingest/eia`** downloads the three EIA CO2 workbooks and uploads them to the bucket under a folder for the current month. It takes no parameters.
+**i. `POST /ingest/eia`** downloads the three EIA CO2 workbooks and uploads them to the bucket under a folder for the current month. It takes no parameters.
 
 From the Swagger UI, open `POST /ingest/eia` → **Try it out** → **Execute**. Or from the terminal:
 
@@ -242,13 +242,27 @@ A successful call returns `200` with the month and the files written:
 }
 ```
 
+**ii. `POST /ingest/bea`** gets real GDP by state from the BEA API (table `SAGDP9`, all years) and saves it as JSON under a folder for the current month. It needs `BEA_API_KEY` in `.env`, and you call it the same way as above:
+
+```bash
+curl -X POST http://localhost:8000/ingest/bea
+```
+
+A successful call returns `200`:
+
+```json
+{"month": "2026-10", "rows": 1740, "files_stored": ["raw/bea_gdp/downloaded_2026-10/real_gdp_by_state_all_years.json"]}
+```
+
 ### 7. Verify the files in the bucket
 
 ```bash
 gcloud storage ls gs://emission-impossible/raw/eia_co2/
+gcloud storage ls gs://emission-impossible/raw/bea_gdp/
 ```
 
-or open **Cloud Storage → Buckets → emission-impossible → raw → eia_co2** in the GCP console.
+or open **Cloud Storage → Buckets → emission-impossible → raw → eia_co2** 
+(or **bea_gdp**) in the GCP console.
 
 ### Running FastAPI in Docker
 
@@ -270,11 +284,11 @@ Each ingestion run writes a dated snapshot, so earlier pulls are kept and EIA's 
 ```
 gs://emission-impossible/
 ├── raw/
-│   ├── eia_co2/YYYY-MM/          # CO2_total.xlsx, CO2_source.xlsx, CO2_sector.xlsx
-│   ├── bea_gdp/YYYY-MM/          # planned
-│   ├── eia_generation/YYYY-MM/   # planned
-│   └── eia_prices/YYYY-MM/       # planned
-└── processed/                    # planned: cleaned, merged state-year tables
+│   ├── eia_co2/YYYY-MM/              # CO2_total.xlsx, CO2_source.xlsx, CO2_sector.xlsx
+│   ├── bea_gdp/downloaded_YYYY-MM/   # real_gdp_by_state_all_years.json     
+│   ├── eia_generation/YYYY-MM/       # planned
+│   └── eia_prices/YYYY-MM/           # planned
+└── processed/                        # planned: cleaned, merged state-year tables
 ```
 
 ---
@@ -286,9 +300,10 @@ emission-impossible/
 ├── api/
 │   ├── collectors/
 │   │   ├── __init__.py
+│   │   ├── bea.py               # calls the BEA API for real GDP by state 
 │   │   └── eia.py               # downloads the EIA SEDS CO2 workbooks
 │   ├── Dockerfile               # container for the FastAPI service
-│   ├── main.py                  # FastAPI app and routes (POST /ingest/eia)
+│   ├── main.py                  # FastAPI, Routes (POST /ingest/eia, POST /ingest/bea)
 │   ├── requirements.txt
 │   ├── storage.py               # read/write Google Cloud Storage
 │   ├── transform.py             # cleaning, reshaping, and the state-year join
