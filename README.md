@@ -83,7 +83,7 @@ The collector calls the BEA Regional dataset once per run with these parameters:
 | `GeoFips` | `STATE` | Every state |
 | `Year` | `ALL` | Full available history |
 
-Each row returned is one state-year:
+Along with the 50 states and DC, BEA also returns the US total and 8 regions, which the transform drops. Each row has these fields:
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -135,15 +135,15 @@ Data from the U.S. Energy Information Administration and the U.S. Bureau of Econ
 
 **What the combination reveals**
 
-Only the joined data can show carbon intensity (CO2 ÷ real GDP) for every state and year. From that we get each state's decoupling category, its trend over time, and the fuels, sectors, and generation-mix changes behind it. Comparing our computed intensity against EIA's published "CO2 per million dollars" sheet validates the join and the units.
+Only the joined data can show carbon intensity (CO2 ÷ real GDP) for every state and year. From that we get each state's decoupling category, its trend over time, and the fuels, sectors, and generation-mix changes behind it. We plan to compare our computed intensity against EIA's published "CO2 per million dollars" sheet to validate the join and the units.
 
 **How the sources are combined**
 
-- **Join key: state + year.** BEA identifies states by FIPS code (`GeoFips`) and name (`GeoName`). The EIA workbooks and API use two-letter state abbreviations. A small lookup table maps all of them to one identifier.
+- **Join key: state + year.** The EIA workbooks use two-letter state abbreviations and BEA uses state names (`GeoName`). A lookup table in `transform.py` maps BEA's names to the two-letter codes, so both sources share one `state` column.
 - **Reshaping:** the EIA workbooks are reshaped from one-column-per-year to one row per state per year, and the `Contents` sheets and any non-state rows (e.g. U.S. total) are dropped.
-- **Aggregation:** monthly generation is summed to annual totals before joining.
+- **Aggregation (planned):** monthly generation is summed to annual totals before joining.
 - **Common window:** analyses combining emissions and GDP use **1997–2024**, where both sources overlap.
-- **Units:** CO2 (million metric tons) ÷ real GDP (millions of chained 2017 dollars) gives metric tons of CO2 per dollar of real GDP. Because that number is very small, we report **metric tons per million dollars** (the same scale as EIA's published sheet) or kilograms per dollar.
+- **Units:** CO2 (million metric tons) ÷ real GDP (millions of chained 2017 dollars) gives metric tons of CO2 per dollar of real GDP. Because that number is very small, the `intensity` column is in **metric tons per million dollars** (the same scale as EIA's published sheet).
 
 
 ## Setup Instructions (Locally)
@@ -194,12 +194,12 @@ cp .env_template .env
 | --- | --- | --- |
 | `GCP_PROJECT_ID` | GCP project ID | `emission-impossible` |
 | `GCS_BUCKET_NAME` | Bucket where raw and processed data is stored | `emission-impossible` |
-| `GOOGLE_APPLICATION_CREDENTIALS` | *(Optional)* absolute path to a service account JSON key, if not using `gcloud auth` | `/Users/you/keys/emission-impossible.json` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Absolute path to the service account JSON key | `/Users/you/keys/emission-impossible.json` |
 | `BEA_API_KEY` | BEA Regional API key ([signup](https://apps.bea.gov/API/signup/)) | 36-character UserID |
 | `EIA_API_KEY` | EIA Open Data API key ([signup](https://www.eia.gov/opendata/register.php)) | 40-character key |
 | `API_SERVICE_URL` | Where the Streamlit app reaches the API | `http://localhost:8000` |
 
-> **TODO:** make these names match exactly what `api/user_definition.py` reads, and keep `.env_template` in sync with this table.
+Make these names match exactly what `api/user_definition.py` reads, and keep `.env_template` in sync with this table.
 
 ### 5. Start the API server
 
@@ -254,15 +254,54 @@ A successful call returns `200`:
 {"month": "2026-10", "rows": 1740, "files_stored": ["raw/bea_gdp/downloaded_2026-10/real_gdp_by_state_all_years.json"]}
 ```
 
-### 7. Verify the files in the bucket
+### 7. Run the transform
+
+**`POST /transform`** builds the processed table from the newest raw files already in the bucket. It does not call EIA or BEA, needs no API key, and takes no parameters. It cleans the EIA sheets and the BEA GDP data, joins them on state and year, adds carbon intensity, and saves `processed/co2_gdp_by_state_year.csv`. Each run replaces that file.
+
+Run it after the ingestion endpoints, with the server from step 5 running. Call it from the Swagger UI (**Try it out** → **Execute**) or from a second terminal while the server keeps running.
+
+```bash
+curl -X POST http://localhost:8000/transform
+```
+
+A successful call returns `200`. In the Swagger UI, the code and the response body appear below **Execute**. With curl, the same JSON prints in your terminal:
+
+```json
+{
+  "rows": 1428,
+  "states": 51,
+  "years": [1997, 2024],
+  "columns": ["state", "year", "co2", "gdp", "intensity", "co2_coal", "co2_natural_gas", "co2_petroleum", "co2_residential", "co2_commercial", "co2_industrial", "co2_transportation", "co2_electric_power"],
+  "sources": [
+    "raw/eia_co2/2026-10/CO2_total.xlsx",
+    "raw/eia_co2/2026-10/CO2_source.xlsx",
+    "raw/eia_co2/2026-10/CO2_sector.xlsx",
+    "raw/bea_gdp/downloaded_2026-10/real_gdp_by_state_all_years.json"
+  ],
+  "file_stored": "processed/co2_gdp_by_state_year.csv"
+}
+```
+
+The terminal running the server logs each cleaning step and ends with the data checks and the status:
+
+```
+2026-10-07 01:09:15,254 INFO transform: Checks: 51 states, years 1997-2024, 28-28 rows per state, 0 duplicates, 0 missing values
+2026-10-07 01:09:15,765 INFO transform: Saved 1428 rows to processed/co2_gdp_by_state_year.csv
+INFO   127.0.0.1:58535 - "POST /transform HTTP/1.1" 200
+```
+
+If a raw file is missing, it returns `404`: run the matching ingestion endpoint first. If an EIA sheet's layout changes or the joined table fails its checks, it returns `500` with the reason.
+
+### 8. Verify the files in the bucket
 
 ```bash
 gcloud storage ls gs://emission-impossible/raw/eia_co2/
 gcloud storage ls gs://emission-impossible/raw/bea_gdp/
+gcloud storage ls gs://emission-impossible/processed/
 ```
 
 or open **Cloud Storage → Buckets → emission-impossible → raw → eia_co2** 
-(or **bea_gdp**) in the GCP console.
+(or **bea_gdp**) in the GCP console. The processed CSV is under **emission-impossible → processed**.
 
 ### Running FastAPI in Docker
 
@@ -279,7 +318,7 @@ If you authenticate with a service account key, mount it into the container and 
 
 ## Storage Layout (GCS)
 
-Each ingestion run writes a dated snapshot, so earlier pulls are kept and EIA's yearly revisions can be compared.
+Each ingestion run writes a dated snapshot, so earlier pulls are kept and EIA's yearly revisions can be compared. `processed/` holds a single file that `POST /transform` rebuilds from the newest raw files on every run.
 
 ```
 gs://emission-impossible/
@@ -288,8 +327,25 @@ gs://emission-impossible/
 │   ├── bea_gdp/downloaded_YYYY-MM/   # real_gdp_by_state_all_years.json     
 │   ├── eia_generation/YYYY-MM/       # planned
 │   └── eia_prices/YYYY-MM/           # planned
-└── processed/                        # planned: cleaned, merged state-year tables
+└── processed/                        # clean and merged state-year tables
+    ├── co2_gdp_by_state_year.csv     # one row per state per year, built by POST /transform
 ```
+
+## Processed Data
+
+`processed/co2_gdp_by_state_year.csv` has one row per state per year: 51 states (50 + DC) × 28 years (1997–2024) = 1,428 rows. EIA covers 1960–2024 and BEA covers 1997–2025, so the join keeps only the years both have.
+
+| Column | Description | Unit | Source |
+| --- | --- | --- | --- |
+| `state` | Two-letter state code (50 states + DC) | – | EIA codes; BEA state names mapped to codes |
+| `year` | Year | – | Both |
+| `co2` | Total energy-related CO2 | million metric tons | EIA `CO2_total.xlsx`, "Total CO2" sheet |
+| `gdp` | Real GDP | millions of chained 2017 dollars | BEA `SAGDP9`, LineCode 1 |
+| `intensity` | Carbon intensity: `co2 × 1,000,000 ÷ gdp` | metric tons of CO2 per $1M of real GDP | Calculated |
+| `co2_coal`, `co2_natural_gas`, `co2_petroleum` | CO2 by fuel | million metric tons | EIA `CO2_source.xlsx`, one sheet each |
+| `co2_residential`, `co2_commercial`, `co2_industrial`, `co2_transportation`, `co2_electric_power` | CO2 by sector | million metric tons | EIA `CO2_sector.xlsx`, one sheet each |
+
+The fuel columns and the sector columns each add up to `co2`, within EIA's rounding to 3 decimals.
 
 ---
 
@@ -303,7 +359,7 @@ emission-impossible/
 │   │   ├── bea.py               # calls the BEA API for real GDP by state 
 │   │   └── eia.py               # downloads the EIA SEDS CO2 workbooks
 │   ├── Dockerfile               # container for the FastAPI service
-│   ├── main.py                  # FastAPI, Routes (POST /ingest/eia, POST /ingest/bea)
+│   ├── main.py                  # FastAPI, Routes (POST /ingest/eia, POST /ingest/bea, POST /transform)
 │   ├── requirements.txt
 │   ├── storage.py               # read/write Google Cloud Storage
 │   ├── transform.py             # cleaning, reshaping, and the state-year join

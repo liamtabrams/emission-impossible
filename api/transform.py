@@ -1,13 +1,3 @@
-"""Transform: clean the raw EIA and BEA files, join them by state and year,
-and save one processed CSV to GCS.
-
-Reads the newest copy of each raw file:
-    raw/eia_co2/YYYY-MM/CO2_total.xlsx, CO2_source.xlsx, CO2_sector.xlsx
-    raw/bea_gdp/downloaded_YYYY-MM/real_gdp_by_state_all_years.json
-Writes:
-    processed/co2_gdp_by_state_year.csv  (one row per state per year)
-"""
-
 import io
 import json
 import logging
@@ -25,8 +15,7 @@ BEA_FOLDER = "raw/bea_gdp"
 BEA_FILE = "real_gdp_by_state_all_years.json"
 PROCESSED_FILE = "processed/co2_gdp_by_state_year.csv"
 
-# Which sheet of which EIA workbook becomes which column.
-# All values are in million metric tons of CO2.
+
 EIA_SHEETS = [
     ("CO2_total.xlsx", "Total CO2", "co2"),
     ("CO2_source.xlsx", "Coal", "co2_coal"),
@@ -47,8 +36,6 @@ SECTOR_COLUMNS = [
     "co2_electric_power",
 ]
 
-# EIA uses 2-letter state codes and BEA uses full names.
-# This maps BEA's names to EIA's codes so both sources share one "state" key.
 STATE_CODES = {
     "Alabama": "AL",
     "Alaska": "AK",
@@ -105,8 +92,7 @@ STATE_CODES = {
 
 
 def find_newest_file(folder, file_name):
-    """Return the path of the newest copy of file_name under folder.
-    Month folders (2026-09, 2026-10, ...) sort by date, so the last one is the newest."""
+    """Return the path of the newest copy of file_name under folder and sort by date so the last one is the newest."""
     paths = list_gcs_files(service_account_key, project_id, bucket_name, folder + "/")
     matches = sorted(path for path in paths if path.endswith("/" + file_name))
     if not matches:
@@ -116,13 +102,9 @@ def find_newest_file(folder, file_name):
 
 
 def clean_eia_sheet(workbook_bytes, sheet, column):
-    """Clean one EIA sheet into a table with one row per state per year: state, year, <column>.
-
-    The raw sheet has title rows on top, one row per state, one column per year,
-    and extra rows (U.S. total, notes) that are not states."""
+    """Clean one EIA sheet into a table with one row per state per year."""
     raw = pd.read_excel(io.BytesIO(workbook_bytes), sheet_name=sheet, header=None)
 
-    # Skip the title rows: the real header is the row whose first cell is "State".
     first_column = raw[0].astype(str).str.strip()
     header_rows = raw.index[first_column == "State"]
     if len(header_rows) == 0:
@@ -132,15 +114,12 @@ def clean_eia_sheet(workbook_bytes, sheet, column):
     header_row = header_rows[0]
     table = raw.iloc[header_row + 1 :].copy()
     column_names = list(raw.iloc[header_row])
-    # the first column holds the state codes
     column_names[0] = "state"
     table.columns = column_names
 
-    # Keep only the 50 states and DC, drops the US total and the notes rows
     table["state"] = table["state"].astype(str).str.strip()
     table = table[table["state"].isin(STATE_CODES.values())]
 
-    # Keep only the year columns, their names start with 4 digits
     year_columns = [name for name in table.columns if str(name)[:4].isdigit()]
     table = table[["state"] + year_columns]
 
@@ -162,13 +141,9 @@ def clean_bea_gdp(json_bytes):
     rows = reply["BEAAPI"]["Results"]["Data"]
     gdp = pd.DataFrame(rows)
 
-    # Map full state names to 2-letter codes. The US total and BEA's
-    # regions (like New England) which have no code, so they are dropped.
     gdp["state"] = gdp["GeoName"].str.strip().map(STATE_CODES)
     gdp = gdp[gdp["state"].notna()].copy()
 
-    # Years and values arrive as text, turn them into numbers
-    # removing any thousands commas first
     gdp["year"] = gdp["TimePeriod"].astype(int)
     gdp["gdp"] = pd.to_numeric(gdp["DataValue"].str.replace(",", ""), errors="coerce")
 
@@ -189,11 +164,10 @@ def build_table(eia_files, bea_bytes):
     for sheet_table in sheet_tables[1:]:
         table = table.merge(sheet_table, on=["state", "year"], how="left")
 
-    # Join with GDP. "inner" keeps only the years both sources have 1997 onwards.
+    # Join with GDP
     gdp = clean_bea_gdp(bea_bytes)
     table = table.merge(gdp, on=["state", "year"], how="inner")
 
-    # Carbon intensity in tonnes of CO2 per 1 million dollar of real GDP
     # co2 is in million tonnes, gdp in millions of dollars
     table["intensity"] = table["co2"] * 1_000_000 / table["gdp"]
 
@@ -245,7 +219,7 @@ def create_processed_csv():
     )
     sources.append(bea_path)
 
-    # Clean, join and check
+    # Clean join and check
     table = build_table(eia_files, bea_bytes)
     check_table(table)
 
