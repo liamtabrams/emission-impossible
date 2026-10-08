@@ -28,6 +28,10 @@ EIA_COLLECT_PATH="/ingest/eia"  # must match the route in api/main.py
 BEA_SCHEDULER_JOB="collect-bea"
 BEA_COLLECT_PATH="/ingest/bea"  # must match the route in api/main.py
 
+# Transform endpoint (api/transform.py)
+TRANSFORM_SCHEDULER_JOB="transform"
+TRANSFORM_PATH="/transform"  # must match the route in api/main.py
+
 # Cloud Scheduler job: name, schedule, and the request body.
 # For more info, access Documentation: https://docs.cloud.google.com/scheduler/docs/configuring/cron-job-schedules
 # cron job schedule collects every day
@@ -45,7 +49,8 @@ MESSAGE_BODY='{}'
 for _var in PROJECT_ID REGION API_SERVICE API_DIR \
             API_PORT ENV_FILE LOCAL_KEY_FILE GCP_KEY_SECRET \
             SECRET_MOUNT_PATH EIA_SCHEDULER_JOB EIA_COLLECT_PATH \
-            BEA_SCHEDULER_JOB BEA_COLLECT_PATH SCHEDULE ATTEMPT_DEADLINE; do
+            BEA_SCHEDULER_JOB BEA_COLLECT_PATH TRANSFORM_SCHEDULER_JOB \
+            TRANSFORM_PATH SCHEDULE ATTEMPT_DEADLINE; do
   if [ -z "${!_var}" ]; then
     echo "ERROR: $_var is empty -- fill in the CONFIG block at the top of" \
          "this script before running it." >&2
@@ -116,7 +121,7 @@ deploy_api() {
   # .env points GCP_SERVICE_ACCOUNT_KEY at a path on your laptop.
   gcloud run services update "$API_SERVICE" \
     --region "$REGION" \
-    --update-env-vars=GCP_SERVICE_ACCOUNT_KEY="$SECRET_MOUNT_PATH"
+    --update-env-vars=GOOGLE_APPLICATION_CREDENTIALS="$SECRET_MOUNT_PATH"
 }
 
 api_url() {
@@ -192,23 +197,50 @@ deploy_scheduler_bea() {
     echo "  gcloud run services logs read ${API_SERVICE} --region=${REGION} --limit=50"
 }
 
+# Transform -> gs://<bucket>/processed/co2_gdp_by_state_year.csv
+deploy_scheduler_transform() {
+    local url; url="$(api_url)"
+
+    # create first time, update on every run after that
+    local action=create
+    if gcloud scheduler jobs describe "$TRANSFORM_SCHEDULER_JOB" \
+        --location="$REGION" >/dev/null 2>&1; then
+        action=update
+    fi
+
+    log "Running '${action}' on scheduler job '${TRANSFORM_SCHEDULER_JOB}' -> ${TRANSFORM_PATH} (${SCHEDULE} ${SCHEDULER_TZ})"
+    gcloud scheduler jobs "$action" http "$TRANSFORM_SCHEDULER_JOB" \
+        --location="$REGION" \
+        --schedule="$SCHEDULE" \
+        --time-zone="$SCHEDULER_TZ" \
+        --uri="${url}${TRANSFORM_PATH}" \
+        --http-method=POST \
+        --headers="Content-Type=application/json" \
+        --message-body="$MESSAGE_BODY" \
+        --attempt-deadline="$ATTEMPT_DEADLINE"
+
+    log "Triggering '${TRANSFORM_SCHEDULER_JOB}' once so you can confirm it works"
+    gcloud scheduler jobs run "$TRANSFORM_SCHEDULER_JOB" --location="$REGION"
+    echo "Check the result with:"
+    echo "  gcloud run services logs read ${API_SERVICE} --region=${REGION} --limit=50"
+}
+
 show_urls() {
   echo "API     : $(api_url)"
-  echo "Web app : $(gcloud run services describe "$WEB_SERVICE" \
-    --region "$REGION" --format='value(status.url)')"
 }
 
 # ─── entry point ─────────────────────────────────────────────────────────────
 case "${1:-all}" in
-  all)           bootstrap; deploy_api;
-                 deploy_scheduler_eia; deploy_scheduler_bea; show_urls ;;
-  bootstrap)     bootstrap ;;
-  api)           deploy_api ;;
-  scheduler)     deploy_scheduler_eia; deploy_scheduler_bea ;;
-  scheduler-eia) deploy_scheduler_eia ;;
-  scheduler-bea) deploy_scheduler_bea ;;
-  urls)          show_urls ;;
-  *) echo "usage: $0 {all|bootstrap|api|web|scheduler|urls}" >&2; exit 1 ;;
+  all)                 bootstrap; deploy_api;
+                       deploy_scheduler_eia; deploy_scheduler_bea; deploy_scheduler_transform; show_urls ;;
+  bootstrap)           bootstrap ;;
+  api)                 deploy_api ;;
+  scheduler)           deploy_scheduler_eia; deploy_scheduler_bea; deploy_scheduler_transform ;;
+  scheduler-eia)       deploy_scheduler_eia ;;
+  scheduler-bea)       deploy_scheduler_bea ;;
+  scheduler-transform) deploy_scheduler_transform ;;
+  urls)                show_urls ;;
+  *) echo "usage: $0 {all|bootstrap|web|scheduler|scheduler-eia|scheduler-bea|scheduler-transform|urls}" >&2; exit 1 ;;
 esac
 
 log "Done."
