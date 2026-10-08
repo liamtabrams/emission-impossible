@@ -13,8 +13,15 @@ API_DIR="./api"                         # folder holding the API Dockerfile
 API_PORT=8000                           # must match EXPOSE/CMD in api/Dockerfile
 
 # The key goes to Secret Manager and is mounted at runtime, and .env is read by gcloud at deploy time.
-ENV_FILE="/Users/junghoona/Class/usfca-msdsai/projects/emission-impossible/.env"
-LOCAL_KEY_FILE="/Users/junghoona/emission-impossible-510123-a81afa6403a0.json"
+# repo root, wherever it's cloned
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Folder holding service account key
+KEY_DIR="${KEY_DIR:-$HOME}"
+KEY_FILE_NAME="${KEY_FILE_NAME:-${PROJECT_ID}-a81afa6403a0.json}" # each user's key ID differs
+
+ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
+LOCAL_KEY_FILE="${LOCAL_KEY_FILE:-$KEY_DIR/$KEY_FILE_NAME}"
 
 # The code reads GCP_SERVICE_ACCOUNT_KEY as a file path and mount it
 GCP_KEY_SECRET="group-hw3-gcp-key"
