@@ -3,7 +3,7 @@
 Which U.S. states have grown their economies while cutting carbon emissions? This project collects state-level CO2 emissions, real GDP, power-generation, and energy-price data, stores it in Google Cloud Storage, and serves it through a FastAPI service and a Streamlit dashboard that shows where and how economic growth has "decoupled" from emissions.
 
 - **Git repo:** https://github.com/liamtabrams/emission-impossible
-- **GCP project:** `emission-impossible` (bucket `gs://emission-impossible`, region `us-west1`)
+- **GCP project:** `emission-impossible-510123` (bucket `gs://emission-impossible`, region `us-west1`)
 - **Course:** DSAI 692 Data Acquisition, University of San Francisco
 
 ---
@@ -26,7 +26,7 @@ Which U.S. states have grown their economies while cutting carbon emissions? Thi
 
 Over the past few decades, most states' economies have grown. The open question is whether their energy-related CO2 emissions grew with them or fell. A state that grows its real GDP while its emissions stay flat or decline has **decoupled**. We measure this with **carbon intensity**: CO2 emitted per dollar of real (inflation-adjusted) GDP.
 
-No single dataset answers this question. EIA reports emissions but not economic output. BEA reports output but not emissions. Neither alone explains *why* a state's intensity changed. By combining emissions, GDP, power-generation mix, and energy prices by state and year, we can:
+No single dataset answers this question. The U.S. Energy Information Administration (EIA) reports emissions but not economic output. The Bureau of Economic Analysis (BEA) reports output but not emissions. Neither alone explains *why* a state's intensity changed. By combining emissions, GDP, power-generation mix, and energy prices by state and year, we can:
 
 1. Classify each state's decoupling status over a chosen time window.
 2. Show which fuels (coal, natural gas, petroleum) and which sectors (residential, commercial, industrial, transportation, electric power) drove each state's change.
@@ -153,7 +153,7 @@ Only the joined data can show carbon intensity (CO2 ÷ real GDP) for every state
 - Python 3.11+
 - [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`)
 - Membership in the `emission-impossible` GCP project with write access to the `emission-impossible` bucket
-- Free API keys for BEA and EIA (only needed for the API collectors; the EIA CO2 file ingestion needs no key)
+- Free API keys for BEA (only needed for the API collector; the EIA CO2 file ingestion needs no key)
 
 ### 1. Clone the repository
 
@@ -167,20 +167,12 @@ cd emission-impossible
 ```bash
 cd api
 python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Authenticate with Google Cloud
-
-Either sign in with your own account:
-
-```bash
-gcloud auth application-default login
-gcloud config set project emission-impossible
-```
-
-or point to a service account key file using the variable in step 4.
+### 3. Set up Google Cloud access
+The API reads and writes the bucket with a service account JSON key. Get a key for the project's service account (**IAM & Admin -> Service Accounts -> Keys**) and save it outside the repo. Its path is in .env file as `GOOGLE_APPLICATION_CREDENTIALS` refer step4.
 
 ### 4. Configure environment variables
 
@@ -192,11 +184,10 @@ cp .env_template .env
 
 | Variable | Description | Example |
 | --- | --- | --- |
-| `GCP_PROJECT_ID` | GCP project ID | `emission-impossible` |
-| `GCS_BUCKET_NAME` | Bucket where raw and processed data is stored | `emission-impossible` |
+| `GCP_PROJECT_ID` | GCP project ID | `emission-impossible-510123` |
+| `GCP_BUCKET_NAME` | Bucket where raw and processed data is stored | `emission-impossible` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Absolute path to the service account JSON key | `/Users/you/keys/emission-impossible.json` |
 | `BEA_API_KEY` | BEA Regional API key ([signup](https://apps.bea.gov/API/signup/)) | 36-character UserID |
-| `EIA_API_KEY` | EIA Open Data API key ([signup](https://www.eia.gov/opendata/register.php)) | 40-character key |
 | `API_SERVICE_URL` | Where the Streamlit app reaches the API | `http://localhost:8000` |
 
 Make these names match exactly what `api/user_definition.py` reads, and keep `.env_template` in sync with this table.
@@ -210,11 +201,11 @@ fastapi run main.py
 
 The server runs at `http://localhost:8000`. Interactive docs (Swagger UI) are at **http://localhost:8000/docs**.
 
-### 6. Call the ingestion endpoint
+### 6. Call the EIA and BEA ingestion endpoints
 
 **i. `POST /ingest/eia`** downloads the three EIA CO2 workbooks and uploads them to the bucket under a folder for the current month. It takes no parameters.
 
-From the Swagger UI, open `POST /ingest/eia` → **Try it out** → **Execute**. Or from the terminal:
+From the Swagger UI, open `POST /ingest/eia` -> **Try it out** -> **Execute**. Or from the terminal:
 
 ```bash
 curl -X POST http://localhost:8000/ingest/eia
@@ -242,13 +233,9 @@ A successful call returns `200` with the month and the files written:
 }
 ```
 
-**ii. `POST /ingest/bea`** gets real GDP by state from the BEA API (table `SAGDP9`, all years) and saves it as JSON under a folder for the current month. It needs `BEA_API_KEY` in `.env`, and you call it the same way as above:
+**ii. `POST /ingest/bea`** gets real GDP by state from the BEA API and saves it as JSON under a folder for the current month. It needs `BEA_API_KEY` in `.env`.
 
-```bash
-curl -X POST http://localhost:8000/ingest/bea
-```
-
-A successful call returns `200`:
+Run it the same way from the Swagger UI. A successful call returns `200`:
 
 ```json
 {"month": "2026-10", "rows": 1740, "files_stored": ["raw/bea_gdp/downloaded_2026-10/real_gdp_by_state_all_years.json"]}
@@ -256,15 +243,11 @@ A successful call returns `200`:
 
 ### 7. Run the transform
 
-**`POST /transform`** builds the processed table from the newest raw files already in the bucket. It does not call EIA or BEA, needs no API key, and takes no parameters. It cleans the EIA sheets and the BEA GDP data, joins them on state and year, adds carbon intensity, and saves `processed/co2_gdp_by_state_year.csv`. Each run replaces that file.
+**`POST /transform`** takes the latest EIA and BEA files from the bucket, cleans them, joins them by state and year, adds carbon intensity, and saves the result as `processed/co2_gdp_by_state_year.csv`. It needs no API key or parameters, and each run overwrites the old file.
 
-Run it after the ingestion endpoints, with the server from step 5 running. Call it from the Swagger UI (**Try it out** → **Execute**) or from a second terminal while the server keeps running.
+Run it after the ingestion endpoints: in the Swagger UI, open `POST /transform` -> **Try it out** -> **Execute**.
 
-```bash
-curl -X POST http://localhost:8000/transform
-```
-
-A successful call returns `200`. In the Swagger UI, the code and the response body appear below **Execute**. With curl, the same JSON prints in your terminal:
+A successful call returns `200`, and the response body appears below **Execute**:
 
 ```json
 {
@@ -282,11 +265,12 @@ A successful call returns `200`. In the Swagger UI, the code and the response bo
 }
 ```
 
-The terminal running the server logs each cleaning step and ends with the data checks and the status:
+The terminal running the server prints one line for each EIA sheet (9 in total: the last one is shown), one for BEA, and one when the CSV is saved, followed by status:
 
 ```
-2026-10-07 01:09:15,254 INFO transform: Checks: 51 states, years 1997-2024, 28-28 rows per state, 0 duplicates, 0 missing values
-2026-10-07 01:09:15,765 INFO transform: Saved 1428 rows to processed/co2_gdp_by_state_year.csv
+EIA Electric power: 55 raw rows cleaned to 51 states x 65 years = 3315 rows
+BEA: 1740 raw rows cleaned to 51 states = 1479 rows
+Saved 1428 rows to processed/co2_gdp_by_state_year.csv
 INFO   127.0.0.1:58535 - "POST /transform HTTP/1.1" 200
 ```
 
@@ -294,14 +278,7 @@ If a raw file is missing, it returns `404`: run the matching ingestion endpoint 
 
 ### 8. Verify the files in the bucket
 
-```bash
-gcloud storage ls gs://emission-impossible/raw/eia_co2/
-gcloud storage ls gs://emission-impossible/raw/bea_gdp/
-gcloud storage ls gs://emission-impossible/processed/
-```
-
-or open **Cloud Storage → Buckets → emission-impossible → raw → eia_co2** 
-(or **bea_gdp**) in the GCP console. The processed CSV is under **emission-impossible → processed**.
+In the GCP console, open **Cloud Storage -> Buckets -> emission-impossible**. The raw files are under **raw -> eia_co2** and **raw -> bea_gdp**, and the processed CSV is under **processed**.
 
 ### Running FastAPI in Docker
 
@@ -331,19 +308,19 @@ gs://emission-impossible/
     ├── co2_gdp_by_state_year.csv     # one row per state per year, built by POST /transform
 ```
 
-## Processed Data
+## Processed Data (output of the transform)
 
-`processed/co2_gdp_by_state_year.csv` has one row per state per year: 51 states (50 + DC) × 28 years (1997–2024) = 1,428 rows. EIA covers 1960–2024 and BEA covers 1997–2025, so the join keeps only the years both have.
+`processed/co2_gdp_by_state_year.csv` is the file `POST /transform` creates. It has one row per state per year: 51 states (50 + DC) × 28 years (1997–2024) = 1,428 rows. Only 1997–2024 is kept because those are the years both EIA and BEA have.
 
 | Column | Description | Unit | Source |
 | --- | --- | --- | --- |
-| `state` | Two-letter state code (50 states + DC) | – | EIA codes; BEA state names mapped to codes |
+| `state` | Two-letter state code, e.g. `CA` | – | EIA codes; BEA state names mapped to codes |
 | `year` | Year | – | Both |
-| `co2` | Total energy-related CO2 | million metric tons | EIA `CO2_total.xlsx`, "Total CO2" sheet |
+| `co2` | Total CO2 from energy use | million metric tons | EIA `CO2_total.xlsx`, "Total CO2" sheet |
 | `gdp` | Real GDP | millions of chained 2017 dollars | BEA `SAGDP9`, LineCode 1 |
-| `intensity` | Carbon intensity: `co2 × 1,000,000 ÷ gdp` | metric tons of CO2 per $1M of real GDP | Calculated |
+| `intensity` | CO2 per $1 million of GDP: `co2 × 1,000,000 ÷ gdp` | metric tons of CO2 per $1M of real GDP | Calculated by the transform |
 | `co2_coal`, `co2_natural_gas`, `co2_petroleum` | CO2 by fuel | million metric tons | EIA `CO2_source.xlsx`, one sheet each |
-| `co2_residential`, `co2_commercial`, `co2_industrial`, `co2_transportation`, `co2_electric_power` | CO2 by sector | million metric tons | EIA `CO2_sector.xlsx`, one sheet each |
+| `co2_residential`, `co2_commercial`, `co2_industrial`, `co2_transportation`, `co2_electric_power` | CO2 from homes, businesses, industry, transportation and power plants | million metric tons | EIA `CO2_sector.xlsx`, one sheet each |
 
 The fuel columns and the sector columns each add up to `co2`, within EIA's rounding to 3 decimals.
 
