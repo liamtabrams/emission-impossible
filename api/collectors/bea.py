@@ -12,13 +12,14 @@ file_name_prefix = "raw/bea_gdp"
 BEA_URL = "https://apps.bea.gov/api/data"
 
 
+# "TableName": "SAGDP9" real GDP by state, millions of chained 2017 dollars
 def fetch_from_bea():
     """Call the BEA API for real GDP by state and return the JSON reply."""
     params = {
         "UserID": bea_api_key,
         "method": "GetData",
         "datasetname": "Regional",
-        "TableName": "SAGDP9",  # real GDP by state, millions of chained 2017 dollars
+        "TableName": "SAGDP9",
         "LineCode": "1",
         "GeoFips": "STATE",
         "Year": "ALL",
@@ -41,7 +42,7 @@ def collect():
         raise HTTPException(status_code=500, detail="BEA_API_KEY is not set")
 
     month = datetime.date.today().strftime("%Y-%m")
-    print("Requesting real GDP by state from BEA", flush=True)
+    print("Requesting real GDP by state from BEA..", flush=True)
     data = fetch_from_bea()
 
     # BEA replies with status 200 even when it fails, so check the JSON for an error or empty data
