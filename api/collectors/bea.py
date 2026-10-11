@@ -32,7 +32,8 @@ def fetch_from_bea():
     except requests.RequestException as e:
         # Show only the error type: the full error message can include the URL with the API key
         raise HTTPException(
-            status_code=502, detail=f"Could not get data from BEA: {type(e).__name__}"
+            status_code=502, detail=f"Could not get data from BEA: {type(e).__name__}. 
+            No new file was saved, so /transform keeps using the last saved BEA file."
         )
 
 
