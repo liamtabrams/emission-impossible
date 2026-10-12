@@ -1,20 +1,16 @@
-# FastAPI routes
-import logging
+import json
 
+import analysis
 import transform
 from collectors import bea, eia
-from fastapi import FastAPI
-
-handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-)
-
-for logger_name in ["collectors", "transform"]:
-    logging.getLogger(logger_name).addHandler(handler)
-    logging.getLogger(logger_name).setLevel(logging.INFO)
+from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
+
+
+def to_records(table):
+    """Turn a DataFrame into a list of plain dicts that FastAPI can return as JSON."""
+    return json.loads(table.to_json(orient="records"))
 
 
 @app.post("/ingest/eia")
@@ -30,6 +26,37 @@ def ingest_bea():
 
 @app.post("/transform")
 def run_transform():
-    """Clean the newest raw EIA CO2 workbooks and BEA GDP file, join them by state
-    and year, add carbon intensity, and save processed/co2_gdp_by_state_year.csv."""
+    """Clean the raw EIA CO2 excel files and BEA GDP json, join them by state, year, add carbon intensity, check the result, and save the processed csv."""
     return transform.create_processed_csv()
+
+
+@app.get("/data")
+def get_data(
+    state: str | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
+):
+    """Rows of the processed table (one per state per year), optionally filtered."""
+    table = transform.load_processed_table()
+    if state:
+        state = state.upper()
+        if state not in set(table["state"]):
+            raise HTTPException(status_code=404, detail=f"Unknown state '{state}'")
+        table = table[table["state"] == state]
+    if start_year is not None:
+        table = table[table["year"] >= start_year]
+    if end_year is not None:
+        table = table[table["year"] <= end_year]
+    return to_records(table)
+
+
+@app.get("/decoupling")
+def get_decoupling(start_year: int | None = None, end_year: int | None = None):
+    """Each state's % change in GDP, CO2 and carbon intensity between two years, and its
+    decoupling category. Defaults to the first and last year available."""
+    table = transform.load_processed_table()
+    if start_year is None:
+        start_year = int(table["year"].min())
+    if end_year is None:
+        end_year = int(table["year"].max())
+    return to_records(analysis.decoupling_table(table, start_year, end_year))
