@@ -27,6 +27,7 @@ opentelemetry-api==1.45.0
 packaging==26.3
 pandas==3.0.6
 pillow==12.3.0
+plotly==7.1.0
 proto-plus==1.29.0
 protobuf==7.36.2
 pyarrow==25.0.1
