@@ -1,20 +1,16 @@
 import io
 import json
-import logging
 
 import pandas as pd
 from fastapi import HTTPException
 from storage import download_from_gcs, list_gcs_files, upload_to_gcs
 from user_definition import bucket_name, project_id, service_account_key
 
-logger = logging.getLogger(__name__)
-
 EIA_FOLDER = "raw/eia_co2"
 EIA_FILES = ["CO2_total.xlsx", "CO2_source.xlsx", "CO2_sector.xlsx"]
 BEA_FOLDER = "raw/bea_gdp"
 BEA_FILE = "real_gdp_by_state_all_years.json"
 PROCESSED_FILE = "processed/co2_gdp_by_state_year.csv"
-
 
 EIA_SHEETS = [
     ("CO2_total.xlsx", "Total CO2", "co2"),
@@ -27,7 +23,9 @@ EIA_SHEETS = [
     ("CO2_sector.xlsx", "Transportation", "co2_transportation"),
     ("CO2_sector.xlsx", "Electric power", "co2_electric_power"),
 ]
+
 FUEL_COLUMNS = ["co2_coal", "co2_natural_gas", "co2_petroleum"]
+
 SECTOR_COLUMNS = [
     "co2_residential",
     "co2_commercial",
@@ -125,18 +123,23 @@ def clean_eia_sheet(workbook_bytes, sheet, column):
 
     # Reshape from one column per year to one row per state per year
     long = table.melt(id_vars="state", var_name="year", value_name=column)
-    long["year"] = long["year"].astype(float).astype(int)  # 1960.0 -> 1960
+    long["year"] = long["year"].astype(float).astype(int)
     long[column] = pd.to_numeric(long[column], errors="coerce")
 
-    logger.info(
-        f"EIA '{sheet}': {len(raw)} raw rows -> {table['state'].nunique()} states "
-        f"x {len(year_columns)} years = {len(long)} rows"
+    raw_row_count = len(raw)
+    state_count = table["state"].nunique()
+    year_count = len(year_columns)
+    row_count = len(long)
+    print(
+        f"EIA {sheet}: {raw_row_count} raw rows cleaned to {state_count} states x {year_count} years = {row_count} rows",
+        flush=True,
     )
+
     return long
 
 
 def clean_bea_gdp(json_bytes):
-    """Clean BEA's JSON reply into a table with one row per state per year: state, year, gdp."""
+    """Clean the BEA JSON reply into a table with columns state, year and gdp, one row per state per year."""
     reply = json.loads(json_bytes)
     rows = reply["BEAAPI"]["Results"]["Data"]
     gdp = pd.DataFrame(rows)
@@ -147,15 +150,19 @@ def clean_bea_gdp(json_bytes):
     gdp["year"] = gdp["TimePeriod"].astype(int)
     gdp["gdp"] = pd.to_numeric(gdp["DataValue"].str.replace(",", ""), errors="coerce")
 
-    logger.info(
-        f"BEA: {len(rows)} raw rows -> {gdp['state'].nunique()} states = {len(gdp)} rows"
+    raw_row_count = len(rows)
+    state_count = gdp["state"].nunique()
+    row_count = len(gdp)
+    print(
+        f"BEA: {raw_row_count} raw rows cleaned to {state_count} states = {row_count} rows",
+        flush=True,
     )
+
     return gdp[["state", "year", "gdp"]]
 
 
 def build_table(eia_files, bea_bytes):
-    """Clean every source and join them into one table with one row per state per year."""
-    # Clean each EIA sheet, then add each one to the total CO2 table as a new column.
+    """Combine the EIA and BEA data into one table by state and year."""
     sheet_tables = [
         clean_eia_sheet(eia_files[file_name], sheet, column)
         for file_name, sheet, column in EIA_SHEETS
@@ -164,7 +171,7 @@ def build_table(eia_files, bea_bytes):
     for sheet_table in sheet_tables[1:]:
         table = table.merge(sheet_table, on=["state", "year"], how="left")
 
-    # Join with GDP
+    # join with GDP
     gdp = clean_bea_gdp(bea_bytes)
     table = table.merge(gdp, on=["state", "year"], how="inner")
 
@@ -178,22 +185,8 @@ def build_table(eia_files, bea_bytes):
 
 
 def check_table(table):
-    """Log simple quality checks, and stop if the table is clearly wrong."""
+    """Raise a 500 error if the table is empty or has duplicate state year rows."""
     duplicates = int(table.duplicated(["state", "year"]).sum())
-    missing = int(table.isna().sum().sum())
-    rows_per_state = table.groupby("state").size()
-    fuel_gap = (table[FUEL_COLUMNS].sum(axis=1) - table["co2"]).abs().max()
-    sector_gap = (table[SECTOR_COLUMNS].sum(axis=1) - table["co2"]).abs().max()
-
-    logger.info(
-        f"Checks: {table['state'].nunique()} states, years {table['year'].min()}-"
-        f"{table['year'].max()}, {rows_per_state.min()}-{rows_per_state.max()} rows "
-        f"per state, {duplicates} duplicates, {missing} missing values"
-    )
-    logger.info(
-        f"Checks: fuels differ from total CO2 by at most {fuel_gap:.3f}, "
-        f"sectors by at most {sector_gap:.3f} million tonnes"
-    )
 
     if table.empty or duplicates > 0:
         raise HTTPException(
@@ -203,8 +196,7 @@ def check_table(table):
 
 
 def create_processed_csv():
-    """Clean the newest raw files, join them, and save the processed CSV to GCS."""
-    # Find and download the newest raw files
+    """Download the newest raw files, clean and join them, and save the processed CSV to GCS."""
     eia_files = {}
     sources = []
     for file_name in EIA_FILES:
@@ -219,7 +211,7 @@ def create_processed_csv():
     )
     sources.append(bea_path)
 
-    # Clean join and check
+    # Clean, join and check
     table = build_table(eia_files, bea_bytes)
     check_table(table)
 
@@ -231,10 +223,12 @@ def create_processed_csv():
         PROCESSED_FILE,
         table.to_csv(index=False),
     )
-    logger.info(f"Saved {len(table)} rows to {PROCESSED_FILE}")
+
+    row_count = len(table)
+    print(f"Saved {row_count} rows to {PROCESSED_FILE}", flush=True)
 
     return {
-        "rows": len(table),
+        "rows": row_count,
         "states": int(table["state"].nunique()),
         "years": [int(table["year"].min()), int(table["year"].max())],
         "columns": list(table.columns),
