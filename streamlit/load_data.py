@@ -32,7 +32,7 @@ def retrieve_data_from_gcs(service_account_key: str,
 # ttl is one day, so the app picks up the new file after the yearly run.
 @st.cache_data(ttl=24 * 60 * 60)
 def load_data():
-    data = retrieve_data_from_gcs(service_account_file_path,
+    data = retrieve_data_from_gcs(service_account_key,
                                   project_id,
                                   bucket_name,
                                   file_name)

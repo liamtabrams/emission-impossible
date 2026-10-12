@@ -291,6 +291,20 @@ The server will run at `http://localhost:8000`. Interactive docs (Swagger UI) ar
 
 If you authenticate with a service account key, mount it into the container and set `GOOGLE_APPLICATION_CREDENTIALS` to the path inside the container `/tmp/`.
 
+### Run the dashboard
+
+From the repo root:
+
+```bash
+cd streamlit
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+It opens at http://localhost:8501. It uses the same `.env` as the API and reads `processed/co2_gdp_by_state_year.csv` from the bucket, so run `POST /transform` at least once first.
+
 ---
 
 ## Storage Layout (GCS)
@@ -301,7 +315,7 @@ Each ingestion run writes a dated snapshot, so earlier pulls are kept and EIA's 
 gs://emission-impossible/
 ├── raw/
 │   ├── eia_co2/YYYY-MM/              # CO2_total.xlsx, CO2_source.xlsx, CO2_sector.xlsx
-│   ├── bea_gdp/downloaded_YYYY-MM/   # real_gdp_by_state_all_years.json     
+│   ├── bea_gdp/downloaded_YYYY-MM/   # real_gdp_by_state_all_years.json
 │   ├── eia_generation/YYYY-MM/       # planned
 │   └── eia_prices/YYYY-MM/           # planned
 └── processed/                        # clean and merged state-year tables
@@ -333,7 +347,7 @@ emission-impossible/
 ├── api/
 │   ├── collectors/
 │   │   ├── __init__.py
-│   │   ├── bea.py               # calls the BEA API for real GDP by state 
+│   │   ├── bea.py               # calls the BEA API for real GDP by state
 │   │   └── eia.py               # downloads the EIA SEDS CO2 workbooks
 │   ├── Dockerfile               # container for the FastAPI service
 │   ├── main.py                  # FastAPI, Routes (POST /ingest/eia, POST /ingest/bea, POST /transform)
@@ -343,8 +357,11 @@ emission-impossible/
 │   └── user_definition.py       # configuration loaded from environment variables
 ├── streamlit/
 │   ├── Dockerfile               # container for the dashboard
+│   ├── load_data.py             # downloads the processed CSV from the bucket and calculates percentage changes
+│   ├── national_overview.py     # national overview page: map, national trend, GDP vs CO2 scatter
 │   ├── requirements.txt
-│   └── streamlit_app.py         # dashboard (Phase 3)
+│   ├── streamlit_app.py         # dashboard
+│   └── user_definition.py       # configuration loaded from environment variables
 ├── .env_template                # documented list of required environment variables
 ├── .gitignore
 ├── gcloud_command.sh            # gcloud commands for build and Cloud Run deployment
