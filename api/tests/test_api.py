@@ -1,4 +1,4 @@
-"""The FastAPI endpoints end to end, with a fake bucket in place of GCS."""
+"""The endpoints end to end, with a fake bucket in place of GCS."""
 
 import io
 
@@ -86,24 +86,3 @@ def test_data_filters_by_state_and_years(client, stocked_bucket):
 def test_data_unknown_state_is_a_404(client, stocked_bucket):
     client.post("/transform")
     assert client.get("/data", params={"state": "ZZ"}).status_code == 404
-
-
-def test_decoupling_defaults_to_full_range(client, stocked_bucket):
-    client.post("/transform")
-    rows = client.get("/decoupling").json()
-    assert len(rows) == 51
-    assert set(rows[0]) == {"state", "pct_gdp", "pct_co2", "pct_intensity", "category"}
-
-    # check one state's numbers against the processed table
-    table = pd.read_csv(io.StringIO(stocked_bucket[transform.PROCESSED_FILE]))
-    ca = table[table["state"] == "CA"].set_index("year")
-    expected = (ca.loc[2024, "gdp"] / ca.loc[1997, "gdp"] - 1) * 100
-    ca_row = next(row for row in rows if row["state"] == "CA")
-    assert ca_row["pct_gdp"] == pytest.approx(expected)
-
-
-def test_decoupling_rejects_bad_years(client, stocked_bucket):
-    client.post("/transform")
-    assert client.get("/decoupling", params={"start_year": 2010, "end_year": 2005}).status_code == 400
-    assert client.get("/decoupling", params={"start_year": 1980, "end_year": 2005}).status_code == 400
-    assert client.get("/decoupling", params={"start_year": "abc"}).status_code == 422

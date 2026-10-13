@@ -1,15 +1,5 @@
-"""Shared test fixtures: synthetic raw files shaped like the real EIA and BEA data,
-and a fake bucket so tests never touch GCS.
-
-The EIA layout mirrors the real workbooks (see the prototype's data_inspection.ipynb):
-a 'Contents' sheet first, then on each data sheet a title row, a blank row, a header
-row of 'State' followed by years as floats (1960.0 ... 2024.0), one row per state
-(two-letter code), a 'US' total row, and footnotes underneath.
-
-The BEA layout mirrors the real SAGDP9 reply: BEAAPI -> Results -> Data, one record
-per geography per year, with the US total and 8 BEA regions mixed in, and DataValue
-as text with thousands separators.
-"""
+"""Test fixtures: synthetic raw files laid out like the real EIA workbooks and BEA reply
+(see the prototype's data_inspection.ipynb), and a fake bucket so tests never touch GCS."""
 
 import io
 import json
@@ -49,10 +39,7 @@ MONTH = "2026-10"
 
 
 def make_frames(seed=0):
-    """Synthetic source data as wide tables (rows = states + 'US', columns = years).
-
-    Tests can edit these before rendering them into files.
-    """
+    """Synthetic source data as wide tables (rows = states + 'US', columns = years)."""
     rng = np.random.default_rng(seed)
     rows = STATES + ["US"]
 
@@ -63,20 +50,19 @@ def make_frames(seed=0):
     fuels = {name: wide(1, 60) for name in FUEL_SHEETS}
     total = sum(fuels.values()).round(3)
 
-    # split total into five sectors; the last one takes the remainder so they add up
-    # (every share is at least 5% so the remainder never goes negative)
+    # split total into five sectors (each at least 5%); the last takes the remainder
     shares = 0.05 + 0.75 * rng.dirichlet(np.ones(len(SECTOR_SHEETS)), size=len(rows))
     sectors = {}
     for i, name in enumerate(SECTOR_SHEETS[:-1]):
         sectors[name] = total.mul(shares[:, i], axis=0).round(3)
     sectors[SECTOR_SHEETS[-1]] = (total - sum(sectors.values())).round(3)
 
-    # real GDP in millions of chained 2017 dollars, growing ~2% a year
+    # real GDP in millions of chained 2017 dollars, +2% a year
     base = rng.uniform(30_000, 3_000_000, len(STATES))
     growth = 1.02 ** np.arange(len(BEA_YEARS))
     gdp = pd.DataFrame(np.outer(base, growth).round(1), index=STATES, columns=BEA_YEARS)
 
-    # EIA's published intensity, made with a slightly different GDP vintage (+/-1%)
+    # EIA's published intensity, off by up to 1% like an older GDP vintage
     overlap = [y for y in EIA_YEARS if y in BEA_YEARS]
     noise = rng.uniform(0.99, 1.01, (len(STATES), len(overlap)))
     published = (total.loc[STATES, overlap] * 1e6 / gdp[overlap] * noise).round(1)
@@ -118,11 +104,8 @@ def eia_workbook(sheets):
 
 
 def bea_reply(gdp, data_value_overrides=None):
-    """Bytes of a BEA SAGDP9 JSON reply, including the US total and regions.
-
-    data_value_overrides maps (GeoName, year) to the DataValue text to send instead,
-    or to None to leave that record out.
-    """
+    """Bytes of a BEA SAGDP9 reply. data_value_overrides maps (GeoName, year) to the
+    DataValue text to send instead, or to None to leave that record out."""
     overrides = data_value_overrides or {}
     records = []
     for year in BEA_YEARS:
@@ -134,7 +117,7 @@ def bea_reply(gdp, data_value_overrides=None):
     data = []
     for name, year, value in records:
         text = overrides.get((name, year), f"{value:,.1f}")
-        if text is None:  # None in the overrides = BEA left this record out
+        if text is None:
             continue
         data.append(
             {
