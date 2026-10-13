@@ -7,10 +7,13 @@ PROJECT_ID="emission-impossible-510123"
 REGION="us-west1"                       # keep the same region everywhere
 
 API_SERVICE="api-server"                # Cloud Run service name for the API
+WEB_SERVICE="webapp"                    # Cloud Run service name for Streamlit
 
 API_DIR="./api"                         # folder holding the API Dockerfile
+WEB_DIR="./streamlit"                   # folder holding the Streamlit Dockerfile
 
 API_PORT=8000                           # must match EXPOSE/CMD in api/Dockerfile
+WEB_PORT=8501                           # Streamlit default
 
 # The key goes to Secret Manager and is mounted at runtime, and .env is read by gcloud at deploy time.
 # repo root, wherever it's cloned
@@ -23,7 +26,7 @@ KEY_FILE_NAME="${KEY_FILE_NAME:-${PROJECT_ID}-a81afa6403a0.json}" # each user's 
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
 LOCAL_KEY_FILE="${LOCAL_KEY_FILE:-$KEY_DIR/$KEY_FILE_NAME}"
 
-# The code reads GCP_SERVICE_ACCOUNT_KEY as a file path and mount it
+# The code reads GOOGLE_APPLICATION_CREDENTIALS as a file path and mount it
 GCP_KEY_SECRET="group-hw3-gcp-key"
 SECRET_MOUNT_PATH="/run/secrets/gcp_key"
 
@@ -41,8 +44,8 @@ TRANSFORM_PATH="/transform"  # must match the route in api/main.py
 
 # Cloud Scheduler job: name, schedule, and the request body.
 # For more info, access Documentation: https://docs.cloud.google.com/scheduler/docs/configuring/cron-job-schedules
-# cron job schedule collects every day
-SCHEDULE="0 0 1 1 *"
+# cron job schedule collects on July 1 every year
+SCHEDULE="0 0 1 JUL *"
 SCHEDULER_TZ="America/Los_Angeles"
 
 # How long Scheduler will wait for the API to respond
@@ -53,8 +56,8 @@ MESSAGE_BODY='{}'
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─── validation ──────────────────────────────────────────────────────────────
-for _var in PROJECT_ID REGION API_SERVICE API_DIR \
-            API_PORT ENV_FILE LOCAL_KEY_FILE GCP_KEY_SECRET \
+for _var in PROJECT_ID REGION API_SERVICE WEB_SERVICE API_DIR WEB_DIR \
+            API_PORT WEB_PORT ENV_FILE LOCAL_KEY_FILE GCP_KEY_SECRET \
             SECRET_MOUNT_PATH EIA_SCHEDULER_JOB EIA_COLLECT_PATH \
             BEA_SCHEDULER_JOB BEA_COLLECT_PATH TRANSFORM_SCHEDULER_JOB \
             TRANSFORM_PATH SCHEDULE ATTEMPT_DEADLINE; do
@@ -79,10 +82,13 @@ if [ ! -f "$LOCAL_KEY_FILE" ]; then
   echo "ERROR: LOCAL_KEY_FILE '$LOCAL_KEY_FILE' does not exist." >&2
   exit 1
 fi
-if [ ! -f "$API_DIR/Dockerfile" ]; then
-    echo "ERROR: no Dockerfile in '$API_DIR'." >&2
-    exit 1
-fi
+for _dir in "$API_DIR" "$WEB_DIR"; do
+    if [ ! -f "$_dir/Dockerfile" ]; then
+        echo "ERROR: no Dockerfile in '$_dir'." >&2
+        exit 1
+    fi
+done
+unset _dir
 
 log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 
@@ -145,6 +151,26 @@ api_url() {
     exit 1
   fi
   echo "$url"
+}
+
+# ─── Web app ─────────────────────────────────────────────────────────────────
+deploy_web() {
+  local url; url="$(api_url)"
+
+  log "Deploying ${WEB_SERVICE} from ${WEB_DIR}, pointing at ${url}"
+  gcloud run deploy "$WEB_SERVICE" \
+    --source "$WEB_DIR" \
+    --region "$REGION" \
+    --port="$WEB_PORT" \
+    --allow-unauthenticated \
+    --max-instances=1 \
+    --env-vars-file="$ENV_FILE" \
+    --set-secrets="$SECRET_MOUNT_PATH=$GCP_KEY_SECRET:latest"
+
+  # API_SERVICE_URL is only discoverable after the API is deployed.
+  gcloud run services update "$WEB_SERVICE" \
+    --region "$REGION" \
+    --update-env-vars=GOOGLE_APPLICATION_CREDENTIALS="$SECRET_MOUNT_PATH",API_SERVICE_URL="$url"
 }
 
 # ─── Cloud Scheduler ─────────────────────────────────────────────────────────
@@ -234,20 +260,23 @@ deploy_scheduler_transform() {
 
 show_urls() {
   echo "API     : $(api_url)"
+  echo "Web app : $(gcloud run services describe "$WEB_SERVICE" \
+    --region "$REGION" --format='value(status.url)')"
 }
 
 # ─── entry point ─────────────────────────────────────────────────────────────
 case "${1:-all}" in
-  all)                 bootstrap; deploy_api;
+  all)                 bootstrap; deploy_api; deploy_web
                        deploy_scheduler_eia; deploy_scheduler_bea; deploy_scheduler_transform; show_urls ;;
   bootstrap)           bootstrap ;;
   api)                 deploy_api ;;
+  web)                 deploy_web ;;
   scheduler)           deploy_scheduler_eia; deploy_scheduler_bea; deploy_scheduler_transform ;;
   scheduler-eia)       deploy_scheduler_eia ;;
   scheduler-bea)       deploy_scheduler_bea ;;
   scheduler-transform) deploy_scheduler_transform ;;
   urls)                show_urls ;;
-  *) echo "usage: $0 {all|bootstrap|web|scheduler|scheduler-eia|scheduler-bea|scheduler-transform|urls}" >&2; exit 1 ;;
+  *) echo "usage: $0 {all|bootstrap|api|web|scheduler|scheduler-eia|scheduler-bea|scheduler-transform|urls}" >&2; exit 1 ;;
 esac
 
 log "Done."

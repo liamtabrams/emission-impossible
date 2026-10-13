@@ -305,6 +305,37 @@ streamlit run streamlit_app.py
 
 It opens at http://localhost:8501. It uses the same `.env` as the API and reads `processed/co2_gdp_by_state_year.csv` from the bucket, so run `POST /transform` at least once first.
 
+### How to Run the deployment script `gcloud_command.sh`
+
+Authenticate the gcloud CLI:
+
+```
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+```
+
+Run the script from the root directory:
+```
+bash gcloud_command.sh
+```
+
+Alternatively, you can run each part of the script individually.
+
+* To run web app deployment:
+```
+bash gcloud_command.sh web
+```
+
+* To run api deployment:
+```
+bash gcloud_command.sh api
+```
+
+* To deploy schedulers:
+```
+bash gcloud_command.sh scheduler
+```
+
 ---
 
 ## Storage Layout (GCS)
