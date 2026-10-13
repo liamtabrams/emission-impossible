@@ -290,11 +290,27 @@ def validate_against_eia(table, total_workbook_bytes):
 
 
 def download_newest_raw_files():
-    """Return the newest EIA workbooks (by file name), the newest BEA file, and their bucket paths."""
-    sources = [find_newest_file(EIA_FOLDER, file_name) for file_name in EIA_FILES]
-    sources.append(find_newest_file(BEA_FOLDER, BEA_FILE))
-    files = [download_from_gcs(service_account_key, project_id, bucket_name, path) for path in sources]
-    return dict(zip(EIA_FILES, files[:-1])), files[-1], sources
+    """Download the newest copy of each raw file.
+
+    Returns the EIA workbooks as {file name: bytes}, the BEA file as bytes,
+    and the list of bucket paths that were used.
+    """
+    eia_files = {}
+    sources = []
+    for file_name in EIA_FILES:
+        path = find_newest_file(EIA_FOLDER, file_name)
+        eia_files[file_name] = download_from_gcs(
+            service_account_key, project_id, bucket_name, path
+        )
+        sources.append(path)
+
+    bea_path = find_newest_file(BEA_FOLDER, BEA_FILE)
+    bea_bytes = download_from_gcs(
+        service_account_key, project_id, bucket_name, bea_path
+    )
+    sources.append(bea_path)
+
+    return eia_files, bea_bytes, sources
 
 
 def build_checked_table(eia_files, bea_bytes):
