@@ -44,7 +44,7 @@ TRANSFORM_PATH="/transform"  # must match the route in api/main.py
 
 # Cloud Scheduler job: name, schedule, and the request body.
 # For more info, access Documentation: https://docs.cloud.google.com/scheduler/docs/configuring/cron-job-schedules
-# cron job schedule collects every day
+# cron job schedule collects on July 1 every year
 SCHEDULE="0 0 1 JUL *"
 SCHEDULER_TZ="America/Los_Angeles"
 
