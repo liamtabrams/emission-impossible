@@ -1,10 +1,9 @@
 # Emission Impossible
 
-Which U.S. states have grown their economies while cutting carbon emissions? This project collects state-level CO2 emissions, real GDP, power-generation, and energy-price data, stores it in Google Cloud Storage, and serves it through a FastAPI service and a Streamlit dashboard that shows where and how economic growth has "decoupled" from emissions.
+Which U.S. states have grown their economies while cutting carbon emissions? We collect emissions and economic data at the state level, combine them, and show the results in a Streamlit dashboard. 
 
 - **Git repo:** https://github.com/liamtabrams/emission-impossible
 - **GCP project:** `emission-impossible-510123` (bucket `gs://emission-impossible`, region `us-west1`)
-- **Course:** DSAI 692 Data Acquisition, University of San Francisco
 
 ---
 
@@ -24,67 +23,48 @@ Which U.S. states have grown their economies while cutting carbon emissions? Thi
 
 **Which U.S. states have decoupled economic growth from carbon emissions, and what drove it?**
 
-Over the past few decades, most states' economies have grown. The open question is whether their energy-related CO2 emissions grew with them or fell. A state that grows its real GDP while its emissions stay flat or decline has **decoupled**. We measure this with **carbon intensity**: CO2 emitted per dollar of real (inflation-adjusted) GDP.
+Most U.S. states' economies grew between 1997 and 2024. We want to know whether their carbon emissions grew as well, or whether they cut emissions. 
+Some people argue that cutting emissions means giving up economic growth; we test that idea one state at a time. Since many energy policies are dictated by state, we show which states are getting cleaner and which are falling behind. 
 
-No single dataset answers this question. The U.S. Energy Information Administration (EIA) reports emissions but not economic output. The Bureau of Economic Analysis (BEA) reports output but not emissions. Neither alone explains *why* a state's intensity changed. By combining emissions, GDP, power-generation mix, and energy prices by state and year, we can:
+**Key Terms**
 
-1. Classify each state's decoupling status over a chosen time window.
-2. Show which fuels (coal, natural gas, petroleum) and which sectors (residential, commercial, industrial, transportation, electric power) drove each state's change.
-3. Relate decoupling to shifts in the electricity generation mix (e.g. coal giving way to gas and renewables) and to changes in energy prices.
+-Real GDP (rGDP) - we use to measure the size of a state's economy. Real means adjusted for inflation.
 
-This is useful to state energy and policy analysts, researchers, and anyone asking how much the U.S. has actually shifted toward cleaner growth. Results are descriptive associations, not causal estimates.
+-Carbon Intensity - how much CO2 a state releases for every $1 million of GDP. 
 
-### Decoupling categories
+-Decoupling - when a state's economy grows, but emissions do not grow proportionately, or fall. 
 
-| Category | Real GDP | CO2 emissions |
-| --- | --- | --- |
-| Absolute decoupling | ↑ | ↓ |
-| Relative decoupling | ↑ | ↑, but more slowly than GDP |
-| No decoupling | ↑ | ↑ as fast as or faster than GDP |
-| Contraction | ↓ | — (treated separately) |
+-Absolute Decoupling - rGDP goes up CO2 emissions goes down
 
-### Planned dashboard views
+-Relative Decoupling - GDP goes up, CO2 emissions go up at a slower rate than GDP. 
 
-- **Decoupling map:** states colored by % change in carbon intensity between two selectable years (multi-year averages to smooth noise).
-- **State profile:** pick a state and year to see the economy's makeup next to emissions by sector.
-- **What fuels changed?** Change in emissions by fuel type (coal, natural gas, petroleum).
+-No decoupling - GDP goes up, CO2 emissions go up at the same rate or faster than GDP. 
+
 
 ---
 
 ## Data Sources
 
-| # | Source & Link | Method | What it contains | Update frequency | Access requirements | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | [EIA State Energy Data System (SEDS) CO2 emissions tables](https://www.eia.gov/environment/emissions/state/) | File (.xlsx downloaded from URL) | Energy-related CO2 by state, 1960–2024, in three workbooks (details below) | Annual (current release June 26, 2026; next June 25, 2027) | None. Public, no key | Implemented (`POST /ingest/eia`) |
-| 2 | [BEA Regional API](https://apps.bea.gov/api/data), table `SAGDP9`, `LineCode=1` | API | Real GDP by state and year, 1997–2025, in millions of chained 2017 dollars | Annual, revised yearly (quarterly state GDP also available as `SQGDP`) | Free key (`BEA_API_KEY`), [signup](https://apps.bea.gov/API/signup/). Limits: 100 requests/min, 100 MB/min, 30 errors/min | Implemented (`POST /ingest/bea`) |
-| 3 | [EIA API v2, `electricity/electric-power-operational-data`](https://api.eia.gov/v2/electricity/electric-power-operational-data/data/) | API | Net electricity generation by state, fuel type, and sector (thousand MWh) | **Monthly** (posted about 2 months after the fact) | Free key (`EIA_API_KEY`), [signup](https://www.eia.gov/opendata/register.php). Max 5,000 rows per request | Planned (recurring source) |
-| 4 | [EIA API v2, SEDS price series](https://www.eia.gov/opendata/) | API | Energy prices by state, 1997–2024: `CLEID` (coal price, electric power sector), `ESRCD` (residential electricity price), `ESTCD` (all-sector electricity price) | Annual | Same `EIA_API_KEY` | Planned |
+| # | Source | Method | What it contains | Update frequency | Access requirements |
+| --- | --- | --- | --- | --- | --- |
+| 1 | [U.S. Energy Information Administration (EIA)](https://www.eia.gov/environment/emissions/state/) | Download 3 Excel files | CO2 emissions by state and year (1960–2024) | Once a year | Public (no key required) |
+| 2 | [U.S. Bureau of Economic Analysis (BEA)](https://apps.bea.gov/api/data) | API | Real GDP by state and year (1997–2025) | Once a year | Key required |
 
-### Source 1 detail: EIA SEDS CO2 workbooks
+**We downloaded the following files from the EIA**
 
-The collector downloads three workbooks from EIA and stores them in the bucket unchanged. All emissions values are in **million metric tons of CO2**.
+-Total CO2: https://www.eia.gov/state/seds/sep_sum/html/xls/CO2_total.xlsx
 
-| Workbook (bucket name) | Worksheets |
-| --- | --- |
-| `CO2_total.xlsx` | Total CO2, Per capita, CO2 per billion Btu (intensity of energy supply), CO2 per million dollars (intensity of economy, i.e. CO2 ÷ real GDP) |
-| `CO2_source.xlsx` | Coal, Natural gas, Petroleum, Total |
-| `CO2_sector.xlsx` | Residential, Commercial, Industrial, Transportation, Electric power, Total |
+-CO2 by fuel: https://www.eia.gov/state/seds/sep_sum/html/xls/CO2_source.xlsx
 
-### Source 2 detail: BEA real GDP by state
+-CO2 by sector: https://www.eia.gov/state/seds/sep_sum/html/xls/CO2_sector.xlsx
 
-The collector calls the BEA Regional dataset once per run with these parameters:
+**From the BEA we request the following data:**
 
-| Parameter | Value | Meaning |
-| --- | --- | --- |
-| `method` | `GetData` | Data request (vs. metadata discovery) |
-| `datasetname` | `Regional` | The only BEA dataset with state-level GDP |
-| `TableName` | `SAGDP9` | Real GDP by state, chained dollars, by industry |
-| `LineCode` | `1` | All-industry total |
-| `GeoFips` | `STATE` | Every state |
-| `Year` | `ALL` | Full available history |
+Table SAGDP9 (rGDP by state), Line Code 1 to get the all-industry totals. rGDP is adjusted to 2017 prices to account for inflation.  
 
-Along with the 50 states and DC, BEA also returns the US total and 8 regions, which the transform drops. Each row has these fields:
+**Integration Goal**
 
+<<<<<<< HEAD
 | Field | Type | Description |
 | --- | --- | --- |
 | `GeoFips` | string | State FIPS code (e.g. `56000` for Wyoming) |
@@ -144,74 +124,71 @@ Only the joined data can show carbon intensity (CO2 ÷ real GDP) for every state
 - **Aggregation (planned):** monthly generation is summed to annual totals before joining.
 - **Common window:** analyses combining emissions and GDP use **1997–2024**, where both sources overlap.
 - **Units:** CO2 (million metric tons) ÷ real GDP (millions of chained 2017 dollars) gives metric tons of CO2 per dollar of real GDP. Because that number is very small, the `intensity` column is in **metric tons per million dollars** (the same scale as EIA's published sheet).
+=======
+Neither source has the emission and GDP side data. By combining them, we are able to calculate carbon intensity, as defined above, for every state. This allows us to easily see which states decoupled.
+The two sources are joined on state and year, and due to the different time windows from the sources, the maximum window we can calculate carbon intensity for is 1997-2024. 
+>>>>>>> origin/nahmedi286179-patch-3
 
 
-## Setup Instructions (Locally)
+**Setup Instructions**
 
-### Prerequisites
-
-- Python 3.11+
-- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`)
-- Membership in the `emission-impossible` GCP project with write access to the `emission-impossible` bucket
-- Free API keys for BEA (only needed for the API collector; the EIA CO2 file ingestion needs no key)
-
-### 1. Clone the repository
-
-```bash
+**1. Download the code**
+```
 git clone https://github.com/liamtabrams/emission-impossible
 cd emission-impossible
 ```
-
-### 2. Create a virtual environment and install dependencies
-
-```bash
+**2. Install Necessary Python Packages through a Virtual Envrionment**
+```
 cd api
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+**3. Get a Google Cloud Key**
+From the Google Cloud console, go to IAM & Admin, Service Accounts, Keys and download a key file. 
 
-### 3. Set up Google Cloud access
-The API reads and writes the bucket with a service account JSON key. Get a key for the project's service account (**IAM & Admin -> Service Accounts -> Keys**) and save it outside the repo. Its path is in .env file as `GOOGLE_APPLICATION_CREDENTIALS` refer step4.
+**4. Get a BEA Key**
+Visit https://apps.bea.gov/api/signup/
+Register your name and email and they will send you your key. 
 
-### 4. Configure environment variables
-
-From the repo root, copy the template and fill in your own values. **Never commit `.env`**, which is listed in `.gitignore`.
-
-```bash
+**5. Fill in your keys**
+```
 cp .env_template .env
 ```
+Should fill in with the following:
 
-| Variable | Description | Example |
-| --- | --- | --- |
-| `GCP_PROJECT_ID` | GCP project ID | `emission-impossible-510123` |
-| `GCP_BUCKET_NAME` | Bucket where raw and processed data is stored | `emission-impossible` |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Absolute path to the service account JSON key | `/Users/you/keys/emission-impossible.json` |
-| `BEA_API_KEY` | BEA Regional API key ([signup](https://apps.bea.gov/API/signup/)) | 36-character UserID |
-| `API_SERVICE_URL` | Where the Streamlit app reaches the API | `http://localhost:8000` |
+GCP_Project_ID='emission-impossible-510123'
 
-Make these names match exactly what `api/user_definition.py` reads, and keep `.env_template` in sync with this table.
+GCP_Bucket_Name='emission-impossible'
 
-### 5. Start the API server
+GOOGLE_APPLICATION_CREDENTIALS='Full File path from Step 3'
 
-```bash
+BEA_API_KEY='Key from Step 4' 
+
+**6. Start the API**
+```
 cd api
 fastapi run main.py
 ```
+**7. Download and join the data**
+From the page you just opened, click Try it Out, then execute for the following two buttons (in order)
 
-The server runs at `http://localhost:8000`. Interactive docs (Swagger UI) are at **http://localhost:8000/docs**.
+'POST /ingest/eia' (for EIA data)
 
+<<<<<<< HEAD
 Leave this terminal running. Run the `curl` commands in the steps below from a second terminal.
 
 ### 6. Call the EIA and BEA ingestion endpoints
+=======
+'POST /ingest/bea' (for BEA data)
+>>>>>>> origin/nahmedi286179-patch-3
 
-**i. `POST /ingest/eia`** downloads the three EIA CO2 workbooks and uploads them to the bucket under a folder for the current month. It takes no parameters.
+'POST /transform' (cleans and combines data. Other two collectors must be run successfully before this one.)
 
-From the Swagger UI, open `POST /ingest/eia` -> **Try it out** -> **Execute**. Or from the terminal:
 
-```bash
-curl -X POST http://localhost:8000/ingest/eia
+**8. Run the Dashboard**
 ```
+<<<<<<< HEAD
 
 Or from Python:
 
@@ -349,76 +326,35 @@ cd streamlit
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+=======
+cd Streamlit
+>>>>>>> origin/nahmedi286179-patch-3
 streamlit run streamlit_app.py
 ```
+Open http://localhost:8000/docs in your browser
 
-It opens at http://localhost:8501. It uses the same `.env` as the API and reads `processed/co2_gdp_by_state_year.csv` from the bucket, so run `POST /transform` at least once first.
 
-### How to Run the deployment script `gcloud_command.sh`
 
-Authenticate the gcloud CLI:
+**If it worked, you should see a 'raw' folder and 'processed' folder in your Google Cloud console.**
 
+**How to run the deployment script gcloud_command.sh**
 ```
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
 ```
-
-Run the script from the root directory:
+Run the script from the root directory 
 ```
 bash gcloud_command.sh
 ```
-
-Alternatively, you can run each part of the script individually.
-
-* To run web app deployment:
-```
-bash gcloud_command.sh web
-```
-
-* To run api deployment:
+Run api Deployment
 ```
 bash gcloud_command.sh api
 ```
 
-* To deploy schedulers:
+Deploy Schedulers
 ```
-bash gcloud_command.sh scheduler
+bash gcloud_command.sh api
 ```
-
----
-
-## Storage Layout (GCS)
-
-Each ingestion run writes a dated snapshot, so earlier pulls are kept and EIA's yearly revisions can be compared. `processed/` holds a single file that `POST /transform` rebuilds from the newest raw files on every run.
-
-```
-gs://emission-impossible/
-├── raw/
-│   ├── eia_co2/YYYY-MM/              # CO2_total.xlsx, CO2_source.xlsx, CO2_sector.xlsx
-│   ├── bea_gdp/downloaded_YYYY-MM/   # real_gdp_by_state_all_years.json
-│   ├── eia_generation/YYYY-MM/       # planned
-│   └── eia_prices/YYYY-MM/           # planned
-└── processed/                        # clean and merged state-year tables
-    ├── co2_gdp_by_state_year.csv     # one row per state per year, built by POST /transform
-```
-
-## Processed Data (output of the transform)
-
-`processed/co2_gdp_by_state_year.csv` is the file `POST /transform` creates. It has one row per state per year: 51 states (50 + DC) × 28 years (1997–2024) = 1,428 rows. Only 1997–2024 is kept because those are the years both EIA and BEA have.
-
-| Column | Description | Unit | Source |
-| --- | --- | --- | --- |
-| `state` | Two-letter state code, e.g. `CA` | – | EIA codes; BEA state names mapped to codes |
-| `year` | Year | – | Both |
-| `co2` | Total CO2 from energy use | million metric tons | EIA `CO2_total.xlsx`, "Total CO2" sheet |
-| `gdp` | Real GDP | millions of chained 2017 dollars | BEA `SAGDP9`, LineCode 1 |
-| `intensity` | CO2 per $1 million of GDP: `co2 × 1,000,000 ÷ gdp` | metric tons of CO2 per $1M of real GDP | Calculated by the transform |
-| `co2_coal`, `co2_natural_gas`, `co2_petroleum` | CO2 by fuel | million metric tons | EIA `CO2_source.xlsx`, one sheet each |
-| `co2_residential`, `co2_commercial`, `co2_industrial`, `co2_transportation`, `co2_electric_power` | CO2 from homes, businesses, industry, transportation and power plants | million metric tons | EIA `CO2_sector.xlsx`, one sheet each |
-
-The fuel columns and the sector columns each add up to `co2`, within EIA's rounding to 3 decimals.
-
----
 
 ## Repository Structure
 
@@ -427,6 +363,7 @@ emission-impossible/
 ├── api/
 │   ├── collectors/
 │   │   ├── __init__.py
+<<<<<<< HEAD
 │   │   ├── bea.py               # calls the BEA API for real GDP by state
 │   │   └── eia.py               # downloads the EIA SEDS CO2 workbooks
 │   ├── Dockerfile               # container for the FastAPI service
@@ -435,16 +372,26 @@ emission-impossible/
 │   ├── storage.py               # read/write Google Cloud Storage
 │   ├── transform.py             # cleaning, reshaping, the state-year join, checks, EIA comparison
 │   └── user_definition.py       # configuration loaded from environment variables
-├── streamlit/
-│   ├── Dockerfile               # container for the dashboard
-│   ├── load_data.py             # downloads the processed CSV from the bucket and calculates percentage changes
-│   ├── national_overview.py     # national overview page: map, national trend, GDP vs CO2 scatter
+=======
+│   │   ├── bea.py
+│   │   └── eia.py
+│   ├── Dockerfile
+│   ├── main.py
 │   ├── requirements.txt
-│   ├── streamlit_app.py         # dashboard
-│   └── user_definition.py       # configuration loaded from environment variables
-├── .env_template                # documented list of required environment variables
+│   ├── storage.py
+│   ├── transform.py
+│   └── user_definition.py
+>>>>>>> origin/nahmedi286179-patch-3
+├── streamlit/
+│   ├── Dockerfile
+│   ├── load_data.py
+│   ├── national_overview.py
+│   ├── requirements.txt
+│   ├── streamlit_app.py
+│   └── user_definition.py
+├── .env_template
 ├── .gitignore
-├── gcloud_command.sh            # gcloud commands for build and Cloud Run deployment
+├── gcloud_command.sh
 └── README.md
 ```
 
