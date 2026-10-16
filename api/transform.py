@@ -3,6 +3,7 @@ import json
 
 import pandas as pd
 from fastapi import HTTPException
+from google.api_core.exceptions import NotFound
 from storage import download_from_gcs, list_gcs_files, upload_to_gcs
 from user_definition import bucket_name, project_id, service_account_key
 
@@ -33,6 +34,11 @@ SECTOR_COLUMNS = [
     "co2_transportation",
     "co2_electric_power",
 ]
+
+SUM_TOLERANCE = 0.01  # million metric tons; EIA rounds every value to 3 decimals
+EIA_INTENSITY_FILE = "CO2_total.xlsx"
+EIA_INTENSITY_SHEET = "CO2 per million dollars"
+MAX_MEDIAN_PCT_DIFF = 5.0  # above this it's a units or join mistake, not a GDP revision
 
 STATE_CODES = {
     "Alabama": "AL",
@@ -184,19 +190,111 @@ def build_table(eia_files, bea_bytes):
     return table[columns].sort_values(["state", "year"]).reset_index(drop=True)
 
 
+def fail(message):
+    """Print the reason (so it shows in the Cloud Run logs) and stop with a 500 error."""
+    print(message, flush=True)
+    raise HTTPException(status_code=500, detail=message)
+
+
 def check_table(table):
-    """Raise a 500 error if the table is empty or has duplicate state year rows."""
+    """Stop with a 500 error if the joined table is incomplete or inconsistent, else return a summary."""
+    if table.empty:
+        fail("Processed table is empty")
+    problems = []
+
     duplicates = int(table.duplicated(["state", "year"]).sum())
+    if duplicates:
+        problems.append(f"{duplicates} duplicate state-year rows")
 
-    if table.empty or duplicates > 0:
-        raise HTTPException(
-            status_code=500,
-            detail="Processed table failed checks (empty or duplicate rows)",
-        )
+    missing_states = sorted(set(STATE_CODES.values()) - set(table["state"]))
+    if missing_states:
+        problems.append(f"missing states: {', '.join(missing_states)}")
+
+    all_years = set(range(table["year"].min(), table["year"].max() + 1))
+    gaps = {}
+    for state, years in table.groupby("state")["year"]:
+        if set(years) != all_years:
+            gaps[state] = sorted(all_years - set(years))
+    if gaps:
+        examples = "; ".join(f"{state} missing {years[:5]}" for state, years in list(gaps.items())[:5])
+        problems.append(f"{len(gaps)} states are missing years ({examples})")
+
+    missing = table.isna().sum()
+    missing = missing[missing > 0]
+    if len(missing) > 0:
+        problems.append(f"missing values: {missing.to_dict()}")
+
+    if (table["gdp"] <= 0).any():
+        problems.append(f"{int((table['gdp'] <= 0).sum())} rows with GDP <= 0")
+
+    # the fuel columns and the sector columns should each add up to total CO2
+    largest_gap = {}
+    for name, columns in [("fuel", FUEL_COLUMNS), ("sector", SECTOR_COLUMNS)]:
+        gap = (table[columns].sum(axis=1) - table["co2"]).abs()
+        largest_gap[name] = round(float(gap.max()), 4)
+        if gap.max() > SUM_TOLERANCE:
+            worst = table.loc[gap.idxmax()]
+            problems.append(f"{name} columns differ from total CO2 by up to {gap.max():.3f} "
+                            f"million tonnes (worst: {worst['state']} {worst['year']})")
+
+    summary = {
+        "states": int(table["state"].nunique()),
+        "years": [int(table["year"].min()), int(table["year"].max())],
+        "rows_per_state": int(table.groupby("state").size().min()),
+        "duplicates": duplicates,
+        "missing_values": int(missing.sum()),
+        "max_fuel_gap": largest_gap["fuel"],
+        "max_sector_gap": largest_gap["sector"],
+    }
+    print(f"Checks: {summary}", flush=True)
+    if problems:
+        fail("Processed table failed checks: " + "; ".join(problems))
+    return summary
 
 
-def create_processed_csv():
-    """Download the newest raw files, clean and join them, and save the processed CSV to GCS."""
+def validate_against_eia(table, total_workbook_bytes):
+    """Compare our intensity with EIA's published intensity, and stop with a 500 error
+    if they differ by more than a GDP revision could explain."""
+    try:
+        published = clean_eia_sheet(total_workbook_bytes, EIA_INTENSITY_SHEET, "eia_intensity")
+    except (HTTPException, ValueError) as e:
+        reason = getattr(e, "detail", str(e))
+        print(f"Skipped the EIA intensity comparison: {reason}", flush=True)
+        return {"status": "skipped", "reason": reason}
+
+    published = published[published["eia_intensity"] > 0]
+    compared = table[["state", "year", "intensity"]].merge(published, on=["state", "year"])
+    if compared.empty:
+        fail(f"EIA '{EIA_INTENSITY_SHEET}' sheet shares no state-years with the table")
+
+    # a ratio near 1 means the same units; near 1000 or 0.001 means a units mistake
+    compared["ratio"] = compared["intensity"] / compared["eia_intensity"]
+    pct_diff = (compared["ratio"] - 1).abs() * 100
+    worst = compared.loc[pct_diff.nlargest(3).index, ["state", "year", "intensity", "eia_intensity"]]
+
+    result = {
+        "status": "passed",
+        "rows_compared": len(compared),
+        "median_abs_pct_diff": round(float(pct_diff.median()), 3),
+        "max_abs_pct_diff": round(float(pct_diff.max()), 3),
+        "median_ratio": round(float(compared["ratio"].median()), 4),
+        "worst_rows": worst.round(2).to_dict(orient="records"),
+    }
+    print(f"EIA comparison: {result['rows_compared']} rows, median difference "
+          f"{result['median_abs_pct_diff']}%, max {result['max_abs_pct_diff']}%", flush=True)
+    if result["median_abs_pct_diff"] > MAX_MEDIAN_PCT_DIFF:
+        fail(f"Intensity doesn't match EIA's published values: median difference "
+             f"{result['median_abs_pct_diff']}% (limit {MAX_MEDIAN_PCT_DIFF}%), "
+             f"median ratio ours/EIA {result['median_ratio']}")
+    return result
+
+
+def download_newest_raw_files():
+    """Download the newest copy of each raw file.
+
+    Returns the EIA workbooks as {file name: bytes}, the BEA file as bytes,
+    and the list of bucket paths that were used.
+    """
     eia_files = {}
     sources = []
     for file_name in EIA_FILES:
@@ -205,15 +303,30 @@ def create_processed_csv():
             service_account_key, project_id, bucket_name, path
         )
         sources.append(path)
+
     bea_path = find_newest_file(BEA_FOLDER, BEA_FILE)
     bea_bytes = download_from_gcs(
         service_account_key, project_id, bucket_name, bea_path
     )
     sources.append(bea_path)
 
-    # Clean, join and check
+    return eia_files, bea_bytes, sources
+
+
+def build_checked_table(eia_files, bea_bytes):
+    """Clean, join, check and validate. Returns the table and both reports."""
     table = build_table(eia_files, bea_bytes)
-    check_table(table)
+    checks = check_table(table)
+    validation = validate_against_eia(table, eia_files[EIA_INTENSITY_FILE])
+    return table, checks, validation
+
+
+def create_processed_csv():
+    """Download the newest raw files, clean and join them, and save the processed CSV to GCS."""
+    eia_files, bea_bytes, sources = download_newest_raw_files()
+
+    # Clean, join and check
+    table, checks, validation = build_checked_table(eia_files, bea_bytes)
 
     # Save the processed table as CSV
     upload_to_gcs(
@@ -234,4 +347,15 @@ def create_processed_csv():
         "columns": list(table.columns),
         "sources": sources,
         "file_stored": PROCESSED_FILE,
+        "checks": checks,
+        "validation": validation,
     }
+
+
+def load_processed_table():
+    """Read the processed CSV from the bucket (404 if /transform hasn't been run yet)."""
+    try:
+        data = download_from_gcs(service_account_key, project_id, bucket_name, PROCESSED_FILE)
+    except NotFound:
+        raise HTTPException(status_code=404, detail=f"{PROCESSED_FILE} not found. Run POST /transform first.")
+    return pd.read_csv(io.BytesIO(data))
