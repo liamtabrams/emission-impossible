@@ -4,7 +4,6 @@ Which U.S. states have grown their economies while cutting carbon emissions? We 
 
 - **Git repo:** https://github.com/liamtabrams/emission-impossible
 - **GCP project:** `emission-impossible-510123` (bucket `gs://emission-impossible`, region `us-west1`)
-- **Course:** DSAI 692 Data Acquisition, University of San Francisco
 
 ---
 
@@ -28,31 +27,35 @@ Most U.S. states' economies grew between 1997 and 2024. We want to know whether 
 Some people argue that cutting emissions means giving up economic growth; we test that idea one state at a time. Since many energy policies are dictated by state, we show which states are getting cleaner and which are falling behind. 
 
 **Key Terms**
---Real GDP (rGDP) - we use to measure the size of a state's economy. Real means adjusted for inflation.
---Carbon Intensity - how much CO2 a state releases for every $1 million of GDP. 
---Decoupling - when a state's economy grows, but emissions do not grow proportionately, or fall. 
---Absolute Decoupling - rGDP goes up CO2 emissions goes down
---Relative Decoupling - GDP goes up, CO2 emissions go up at a slower rate than GDP. 
---No decoupling - GDP goes up, CO2 emissions go up at the same rate or faster than GDP. 
 
-### Planned dashboard views
+-Real GDP (rGDP) - we use to measure the size of a state's economy. Real means adjusted for inflation.
 
-- **Decoupling map:** states colored by % change in carbon intensity between two selectable years (multi-year averages to smooth noise).
-- **State profile:** pick a state and year to see the economy's makeup next to emissions by sector.
-- **What fuels changed?** Change in emissions by fuel type (coal, natural gas, petroleum).
+-Carbon Intensity - how much CO2 a state releases for every $1 million of GDP. 
+
+-Decoupling - when a state's economy grows, but emissions do not grow proportionately, or fall. 
+
+-Absolute Decoupling - rGDP goes up CO2 emissions goes down
+
+-Relative Decoupling - GDP goes up, CO2 emissions go up at a slower rate than GDP. 
+
+-No decoupling - GDP goes up, CO2 emissions go up at the same rate or faster than GDP. 
+
 
 ---
 
 ## Data Sources
 
 | # | Source | Method | What it contains | Update frequency | Access requirements |
-| --- | --- | --- | --- | --- | --- | --- |
-| [U.S. Energy Information Administration (EIA)] (https://www.eia.gov/environment/emissions/state/) | |Download 3 Excel Files| |CO2 emissions by state and year (1960-2024) | (Once a year) | Public (no key required) |
-| [U.S. Bureau of Economic Analysis (BEA)] (https://apps.bea.gov/api/data) | API | rGDP by state and year (1997-2025) | Once a year | Key required | 
+| --- | --- | --- | --- | --- | --- |
+| 1 | [U.S. Energy Information Administration (EIA)](https://www.eia.gov/environment/emissions/state/) | Download 3 Excel files | CO2 emissions by state and year (1960–2024) | Once a year | Public (no key required) |
+| 2 | [U.S. Bureau of Economic Analysis (BEA)](https://apps.bea.gov/api/data) | API | Real GDP by state and year (1997–2025) | Once a year | Key required |
 
 **We downloaded the following files from the EIA**
+
 -Total CO2: https://www.eia.gov/state/seds/sep_sum/html/xls/CO2_total.xlsx
+
 -CO2 by fuel: https://www.eia.gov/state/seds/sep_sum/html/xls/CO2_source.xlsx
+
 -CO2 by sector: https://www.eia.gov/state/seds/sep_sum/html/xls/CO2_sector.xlsx
 
 **From the BEA we request the following data:**
@@ -60,6 +63,7 @@ Some people argue that cutting emissions means giving up economic growth; we tes
 Table SAGDP9 (rGDP by state), Line Code 1 to get the all-industry totals. rGDP is adjusted to 2017 prices to account for inflation.  
 
 **Integration Goal**
+
 Neither source has the emission and GDP side data. By combining them, we are able to calculate carbon intensity, as defined above, for every state. This allows us to easily see which states decoupled.
 The two sources are joined on state and year, and due to the different time windows from the sources, the maximum window we can calculate carbon intensity for is 1997-2024. 
 
