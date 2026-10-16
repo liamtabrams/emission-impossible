@@ -80,9 +80,11 @@ pip install -r requirements.txt
 ```
 **3. Get a Google Cloud Key**
 From the Google Cloud console, go to IAM & Admin, Service Accounts, Keys and download a key file. 
+
 **4. Get a BEA Key**
 Visit https://apps.bea.gov/api/signup/
 Register your name and email and they will send you your key. 
+
 **5. Fill in your keys**
 ```
 cp .env_template .env
@@ -98,6 +100,7 @@ cd api
 fastapi run main.py
 ```
 Open http://localhost:8000/docs in your browser
+
 **7. Download and join the data**
 From the page you just opened, click Try it Out, then execute for the following two buttons (in order)
 'POST /ingest/eia' (for EIA data)
@@ -105,6 +108,25 @@ From the page you just opened, click Try it Out, then execute for the following 
 'POST /transform' (cleans and combines data. Other two collectors must be run successfully before this one.)
 
 **If it worked, you should see a 'raw' folder and 'processed' folder in your Google Cloud console.**
+
+**How to run the deployment script gcloud_command.sh**
+```
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+```
+Run the script from the root directory 
+```
+bash gcloud_command.sh
+```
+Run api Deployment
+```
+bash gcloud_command.sh api
+```
+
+Deploy Schedulers
+```
+bash gcloud_command.sh api
+```
 
 ## Repository Structure
 
