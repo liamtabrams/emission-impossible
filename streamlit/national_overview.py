@@ -4,6 +4,10 @@ import streamlit as st
 
 from load_data import load_data, state_change, us_by_year, us_change
 
+# AI use: the streamlit layout and plotly charts were written with help
+# from Claude - Opus 5.5. for sections where AI was used is commented
+# with '#AI assisted:" and the prompt i used.
+
 # colors for the four groups in the scatter plot
 group_colors = {
     "Cut emissions outright": "#2E7D32",
@@ -18,6 +22,10 @@ years = sorted(data["year"].unique().tolist())
 st.title("Emission Impossible: US economic growth and carbon emissions")
 st.caption("Energy related CO2 emissions and real (inflation-adjusted) GDP "
            "for the 50 states and DC.")
+
+#AI assisted:  'Using streamlit, add start and end year dropdowns where end
+# year list only shows years after the start year and 3 KPI style tiles
+# to show % change in GPD, CO2 and carbon intensity'.
 
 # year pickers. the end year list only shows years after the start year.
 col1, col2 = st.columns(2)
@@ -41,6 +49,12 @@ tile3.metric("Carbon intensity", f"{us['intensity']:+.1f}%",
 change = state_change(data, start_year, end_year)
 
 # chart 1: map of % change by state
+
+# AI assisted: 'Create US state map using plotly that shows
+# the % change in CO2 or carbon intensity between the two years,
+# with a button to switch between them. Blue for decrease, red for
+# increase.'
+
 st.subheader(f"Change by state, {start_year} -> {end_year}")
 map_choice = st.radio("Show", ["CO2 emissions", "Carbon intensity"],
                       horizontal=True, label_visibility="collapsed")
@@ -75,6 +89,11 @@ st.caption(f"{cleaner} of {len(change)} states lowered their carbon intensity. "
            f"{went_up} of {len(change)} increased their total CO2 emissions.")
 
 # chart 2: national trend, all three numbers start at 100
+
+# AI assisted: 'Create a line chart of US total GDP, CO2 and
+# carbon intensity indexed to start year = 100, with a dashed line
+# and whole years on the x axis.'
+
 st.subheader(f"National trend, {start_year} -> {end_year}")
 st.caption(f"All states combined, indexed to {start_year} = 100, so GDP and "
            f"CO2 share one axis. Carbon intensity is CO2 divided by GDP.")
@@ -107,6 +126,11 @@ st.plotly_chart(line_fig)
 
 
 # chart 3: % change in economy vs % change in emissions, by group
+
+# AI assisted: 'create a scatter plot of % change in GDP vs %
+# change in CO2 for each state, color by group, and a dashed line
+# where both changed equally'
+
 st.subheader(f"Economic growth vs emissions change, {start_year} -> {end_year}")
 st.caption("Each point is a state. Points below the dashed line grew their "
            "emissions more slowly than their economy.")
