@@ -94,28 +94,38 @@ Register your name and email and they will send you your key.
 cp .env_template .env
 ```
 Should fill in with the following:
+
 GCP_Project_ID='emission-impossible-510123'
+
 GCP_Bucket_Name='emission-impossible'
+
 GOOGLE_APPLICATION_CREDENTIALS='Full File path from Step 3'
+
 BEA_API_KEY='Key from Step 4' 
+
 **6. Start the API**
 ```
 cd api
 fastapi run main.py
 ```
+**7. Download and join the data**
+From the page you just opened, click Try it Out, then execute for the following two buttons (in order)
 
-**7. Run the Dashboard**
+'POST /ingest/eia' (for EIA data)
+
+'POST /ingest/bea' (for BEA data)
+
+'POST /transform' (cleans and combines data. Other two collectors must be run successfully before this one.)
+
+
+**8. Run the Dashboard**
 ```
 cd Streamlit
 streamlit run streamlit_app.py
 ```
 Open http://localhost:8000/docs in your browser
 
-**7. Download and join the data**
-From the page you just opened, click Try it Out, then execute for the following two buttons (in order)
-'POST /ingest/eia' (for EIA data)
-'POST /ingest/bea' (for BEA data)
-'POST /transform' (cleans and combines data. Other two collectors must be run successfully before this one.)
+
 
 **If it worked, you should see a 'raw' folder and 'processed' folder in your Google Cloud console.**
 
