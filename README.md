@@ -103,6 +103,12 @@ BEA_API_KEY='Key from Step 4'
 cd api
 fastapi run main.py
 ```
+
+**7. Run the Dashboard**
+```
+cd Streamlit
+streamlit run streamlit_app.py
+```
 Open http://localhost:8000/docs in your browser
 
 **7. Download and join the data**
